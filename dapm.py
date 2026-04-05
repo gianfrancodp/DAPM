@@ -34,6 +34,7 @@ Notes:
 TARGET_DIR = "../drone_aerial_photos_test"
 OUTPUT_FILE = "../drone_aerial_photos_test/database.geojson"
 MAP_TITLE = "Drone Aerial Photo Map - TEST"
+AUTHOR = "Your Name (@yourusername)"  # Update with your name and optional social handle
 
 # --- IMPORTS ---
 import os
@@ -162,7 +163,7 @@ def extract_drone_metadata(filepath):
         
     return metadata
 
-def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Photo Map"):
+def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Photo Map", author="Gianfranco Di Pietro"):
     """Create an interactive Leaflet.js webmap from GeoJSON data"""
     
     # Read GeoJSON to calculate bounds and center
@@ -269,8 +270,7 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
         /* Horizontal Legend */
         .legend-horizontal {{ background: white; padding: 10px 15px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); min-width: 300px; margin-bottom: 20px !important; margin-left: 10px !important; }}
         .legend-horizontal h4 {{ margin: 0 0 10px 0; color: #333; font-size: 13px; text-align: center; }}
-        .color-scale-bar {{ height: 12px; width: 100%; border-radius: 4px; background: linear-gradient(to right, #8B7355, #D2B48C, #90EE90, #D3D3D3, #FFFFFF); border: 1px solid #aaa; }}
-        .color-ticks {{ display: flex; justify-content: space-between; margin-top: 6px; }}
+        .color-scale-bar {{ height: 12px; width: 100%; border-radius: 4px; background: linear-gradient(to right, #0000FF, #00FF00, #FFFF00, #FF8000, #FF0000); border: 1px solid #aaa; }}        .color-ticks {{ display: flex; justify-content: space-between; margin-top: 6px; }}
         .color-ticks span {{ font-size: 10px; color: #555; position: relative; }}
         .color-ticks span::before {{ content: ''; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 1px; height: 5px; background: #555; }}
     </style>
@@ -289,21 +289,39 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
             zoomControl: false // Disable default zoom to make room for our custom title, we will re-add it below
         }}).setView([{center_lat}, {center_lon}], 16);
         
-        // Add base layer (OpenStreetMap)
-        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+        // Define basemap layers
+        const osmLayer = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
             maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }}).addTo(map);
+            attribution: '© OpenStreetMap contributors',
+            name: 'OpenStreetMap'
+        }});
+        
+        const bingAerialLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+            maxZoom: 19,
+            attribution: '© Esri, DigitalGlobe, Earthstar Geographics',
+            name: 'Bing Aerials'
+        }});
+        
+        // Add OpenStreetMap as default
+        osmLayer.addTo(map);
+        
+        // Create basemap switcher control
+        const baseMaps = {{
+            "OpenStreetMap": osmLayer,
+            "Bing Aerials": bingAerialLayer
+        }};
+        
+        L.control.layers(baseMaps, {{}}, {{ position: 'topright', collapsed: true }}).addTo(map);
         
         const geojsonFile = '{os.path.basename(geojson_file)}';
 
         // --- TITLE PANEL (TOP-LEFT) ---
         const titleControl = L.control({{ position: 'topleft' }});
-        titleControl.onAdd = function(map) {{
+                titleControl.onAdd = function(map) {{
             let div = L.DomUtil.create('div', 'title-box');
             div.innerHTML = '<h1>{title}</h1>';
             div.innerHTML += '<p class="subtitle-db">database file: <strong>' + geojsonFile + '</strong></p>';
-            div.innerHTML += '<p class="subtitle-credits">Created with <a href="https://github.com/gianfrancodp/DAPM" target="_blank">DAPM</a> @gianfrancodp</p>';
+            div.innerHTML += '<p class="subtitle-credits">Created by <strong>{author}</strong> with <a href="https://github.com/gianfrancodp/DAPM" target="_blank">DAPM</a></p>';
             return div;
         }};
         titleControl.addTo(map);
@@ -314,11 +332,11 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
         // Terrain Colormap function
         function getTerrainColor(normalizedAltitude) {{
             const colors = [
-                {{ratio: 0.0, color: '#8B7355'}},
-                {{ratio: 0.25, color: '#D2B48C'}},
-                {{ratio: 0.5, color: '#90EE90'}},
-                {{ratio: 0.75, color: '#D3D3D3'}},
-                {{ratio: 1.0, color: '#FFFFFF'}}
+                {{ratio: 0.0, color: '#0000FF'}},
+                {{ratio: 0.25, color: '#00FF00'}},
+                {{ratio: 0.5, color: '#FFFF00'}},
+                {{ratio: 0.75, color: '#FF8000'}},
+                {{ratio: 1.0, color: '#FF0000'}}
             ];
             
             let lower = colors[0];
@@ -633,4 +651,4 @@ if __name__ == "__main__":
     # create Output directory if it doesn't exist
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     build_geojson(OUTPUT_FILE)
-    create_webmap(OUTPUT_FILE, title=MAP_TITLE)
+    create_webmap(OUTPUT_FILE, title=MAP_TITLE, author=AUTHOR)
