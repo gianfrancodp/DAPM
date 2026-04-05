@@ -398,11 +398,12 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
                     
                     let popupContent = '<div class="photo-popup">';
                     popupContent += '<strong>' + props.filename + '</strong>';
+                    popupContent += '<img src="' + props.filepath + '" style="width: 250px; max-width: 100%; height: auto; margin: 10px 0; border-radius: 4px; display: block;" />';
                     popupContent += '<p><strong>Date:</strong> ' + (props.datetime || 'N/A') + '</p>';
                     popupContent += '<p><strong>Camera:</strong> ' + (props.camera || 'N/A') + '</p>';
                     popupContent += '<p><strong>Altitude:</strong> ' + (coords[2] ? coords[2].toFixed(2) + ' m' : 'N/A') + '</p>';
                     popupContent += '<p><strong>GPS:</strong> ' + coords[1].toFixed(6) + ', ' + coords[0].toFixed(6) + '</p>';
-                    popupContent += '<a href="#" onclick="event.preventDefault(); alert(\\'Filepath: ' + props.filepath.replace(/\\\\/g, '\\\\\\\\') + '\\');">View File Info</a>';
+                    popupContent += '<a href="#" onclick="event.preventDefault(); alert(\\'Filepath: ' + props.filepath.replace(/\\\\/g, '\\\\\\\\') + '\\');">Info File</a>';
                     popupContent += '</div>';
                     
                     const marker = L.circleMarker([coords[1], coords[0]], {{
