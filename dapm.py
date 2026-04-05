@@ -314,6 +314,9 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
         L.control.layers(baseMaps, {{}}, {{ position: 'topright', collapsed: true }}).addTo(map);
         
         const geojsonFile = '{os.path.basename(geojson_file)}';
+        
+        // Hardcoded GeoJSON data to prevent CORS policy issues
+        const geojsonData = {json.dumps(geojson_data)};
 
         // --- TITLE PANEL (TOP-LEFT) ---
         const titleControl = L.control({{ position: 'topleft' }});
@@ -368,16 +371,16 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
             return '#' + [r, g, b].map(x => {{ const hex = x.toString(16); return hex.length === 1 ? '0' + hex : hex; }}).join('');
         }}
         
-        fetch(geojsonFile)
-            .then(response => response.json())
-            .then(data => {{
-                const photoMarkers = L.featureGroup();
-                
-                const allDatetimes = data.features.map(f => f.properties.datetime).filter(dt => dt && dt !== 'unknown').sort();
-                const uniqueDatetimes = [...new Set(allDatetimes)];
-                const maxDatetimeIndex = uniqueDatetimes.length - 1;
-                
-                let currentMinIndex = 0;
+        // Process hardcoded GeoJSON data
+        const data = geojsonData;
+        {{
+            const photoMarkers = L.featureGroup();
+            
+            const allDatetimes = data.features.map(f => f.properties.datetime).filter(dt => dt && dt !== 'unknown').sort();
+            const uniqueDatetimes = [...new Set(allDatetimes)];
+            const maxDatetimeIndex = uniqueDatetimes.length - 1;
+            
+            let currentMinIndex = 0;
                 let currentMaxIndex = maxDatetimeIndex;
                 
                 const allAltitudes = data.features.map(f => f.geometry.coordinates[2]).filter(alt => alt !== null && alt !== undefined);
@@ -574,8 +577,7 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
                     return div;
                 }};
                 stats.addTo(map);
-            }})
-            .catch(error => console.error('Error loading GeoJSON:', error));
+        }}
     </script>
 </body>
 </html>
