@@ -30,19 +30,27 @@ Notes:
 
 '''
 
-# --- CONFIG ---
-TARGET_DIR = "../drone_aerial_photos_test"
-OUTPUT_FILE = "../drone_aerial_photos_test/database.geojson"
-MAP_TITLE = "Drone Aerial Photo Map - TEST"
-AUTHOR = "Your Name (@yourusername)"  # Update with your name and optional social handle
+# --- CONFIGURATION ---
+inputfile = "input.yaml"
 
 # --- IMPORTS ---
 import os
 import json
 import re
+import yaml
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 import xml.etree.ElementTree as ET
+
+# Read configuration from YAML file
+with open(inputfile, 'r') as f:
+    config = yaml.safe_load(f)
+
+TARGET_DIR = config.get('TARGET_DIR')
+OUTPUT_FILE = config.get('OUTPUT_FILE')
+MAP_TITLE = config.get('MAP_TITLE')
+AUTHOR = config.get('AUTHOR')
+
 
 # --- FUNCTIONS ---
 def get_decimal_from_dms(dms, ref):
