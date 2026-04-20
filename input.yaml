@@ -1,4 +1,0 @@
-TARGET_DIR: ../drone_aerial_photos_test
-OUTPUT_FILEE: ../drone_aerial_photos_test.geojson
-MAP_TITLE: "Drone Aerial Photo Map - TEST"
-AUTHOR: "Gianfranco Di Pietro (@gianfrancodp)"  # Update with your name and optional social handle
