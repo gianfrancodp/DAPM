@@ -1,0 +1,4 @@
+TARGET_DIR: E:\DCIM # Update with the path to your drone photos
+OUTPUT_FILE: E:\photodb.geojson # Update with the desired output file path
+MAP_TITLE: "Drone Aerial Photo Map" # Update with your desired map title
+AUTHOR: "Gianfranco Di Pietro (@gianfrancodp)"  # Update with your name and optional social handle
