@@ -3,3 +3,7 @@ lib/*
 Scripts/*
 readme_assets/.thumb/*
 bin/*
+
+__pycache__/*
+*.pyc
+

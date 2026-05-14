@@ -1,0 +1,4 @@
+TARGET_DIR: ../drone_aerial_photos_test
+OUTPUT_FILE: ../drone_aerial_photos_test/photodb.geojson # Update with the desired output file path
+MAP_TITLE: "Drone Aerial Photo Map" # Update with your desired map title
+AUTHOR: "Gianfranco Di Pietro (@gianfrancodp)"  # Update with your name and optional social handle
