@@ -487,96 +487,6 @@ func buildGeoJSON(cfg Config) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Webmap generator
-// ════════════════════════════════════════════════════════════════════════════
-
-// createWebmap reads template.html (from the same directory as the binary),
-// fills in the placeholders, and writes index.html next to the GeoJSON file.
-// The placeholders used in template.html are Python str.format() style, i.e.
-// {title}, {center_lat}, {center_lon}, {geojsonFile}, {geojsonData}, {author}.
-func createWebmap(cfg Config) {
-	// ── 1. Read the GeoJSON we just wrote ────────────────────────────────────
-	raw, err := os.ReadFile(cfg.OutputFile)
-	if err != nil {
-		fmt.Printf("createWebmap: cannot read GeoJSON: %v\n", err)
-		return
-	}
-
-	// ── 2. Decode just enough to compute the map centre ──────────────────────
-	var fc geoCollection
-	if err := json.Unmarshal(raw, &fc); err != nil {
-		fmt.Printf("createWebmap: cannot parse GeoJSON: %v\n", err)
-		return
-	}
-
-	var latSum, lonSum float64
-	var count int
-	for _, f := range fc.Features {
-		if len(f.Geometry.Coordinates) >= 2 {
-			lonSum += f.Geometry.Coordinates[0]
-			latSum += f.Geometry.Coordinates[1]
-			count++
-		}
-	}
-	if count == 0 {
-		fmt.Println("createWebmap: no valid coordinates, skipping webmap.")
-		return
-	}
-	centerLat := latSum / float64(count)
-	centerLon := lonSum / float64(count)
-
-	// ── 3. Load template.html from the binary's directory ────────────────────
-	exe, err := os.Executable()
-	if err != nil {
-		exe = "."
-	}
-	templatePath := filepath.Join(filepath.Dir(exe), "template.html")
-	tmplBytes, err := os.ReadFile(templatePath)
-	if err != nil {
-		fmt.Printf("createWebmap: cannot read template.html at %s: %v\n", templatePath, err)
-		return
-	}
-
-	// ── 4. Fill placeholders ─────────────────────────────────────────────────
-	title := cfg.MapTitle
-	if title == "" {
-		title = "Drone Aerial Photo Map"
-	}
-	author := cfg.Author
-	if author == "" {
-		author = "unknown"
-	}
-
-	geojsonFile := filepath.Base(cfg.OutputFile)
-	geojsonData := string(raw)
-
-	html := string(tmplBytes)
-	html = strings.ReplaceAll(html, "{title}", title)
-	html = strings.ReplaceAll(html, "{center_lat}", strconv.FormatFloat(centerLat, 'f', 6, 64))
-	html = strings.ReplaceAll(html, "{center_lon}", strconv.FormatFloat(centerLon, 'f', 6, 64))
-	html = strings.ReplaceAll(html, "{geojsonFile}", geojsonFile)
-	html = strings.ReplaceAll(html, "{geojsonData}", geojsonData)
-	html = strings.ReplaceAll(html, "{author}", author)
-
-	// The template uses Python str.format() escaping: {{ and }} represent
-	// literal braces in JS/CSS. Now that all {placeholder} substitutions are
-	// done, unescape them so the browser receives valid JavaScript.
-	html = strings.ReplaceAll(html, "{{", "{")
-	html = strings.ReplaceAll(html, "}}", "}")
-
-	// ── 5. Write index.html next to the GeoJSON ──────────────────────────────
-	outputDir := filepath.Dir(cfg.OutputFile)
-	outPath := filepath.Join(outputDir, "index.html")
-	if err := os.WriteFile(outPath, []byte(html), 0644); err != nil {
-		fmt.Printf("createWebmap: cannot write index.html: %v\n", err)
-		return
-	}
-
-	fmt.Printf("✅ Webmap created: %s\n", outPath)
-	fmt.Printf("   Open in browser: file://%s\n", filepath.ToSlash(outPath))
-}
-
-// ════════════════════════════════════════════════════════════════════════════
 // Entry point
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -611,5 +521,4 @@ func main() {
 	fmt.Printf("📁 Scanning: %s\n", cfg.TargetDir)
 	fmt.Printf("📄 Output:   %s\n\n", cfg.OutputFile)
 	buildGeoJSON(cfg)
-	createWebmap(cfg)
 }
