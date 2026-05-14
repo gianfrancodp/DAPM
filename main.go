@@ -413,6 +413,10 @@ type geoCollection struct {
 
 func buildGeoJSON(cfg Config) {
 	var features []geoFeature
+	// Each entry is a flat map of all recoverable fields for no-GPS files.
+	var noGPSRows []map[string]interface{}
+
+	outputDir := filepath.Dir(cfg.OutputFile)
 
 	err := filepath.WalkDir(cfg.TargetDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -430,8 +434,20 @@ func buildGeoJSON(cfg Config) {
 		fmt.Printf("Analyzing: %s\n", path)
 		meta := extractMetadata(path)
 
+		relPath, _ := filepath.Rel(outputDir, path)
+		relPathSlash := filepath.ToSlash(relPath)
+
 		if meta.Lat == nil || meta.Lon == nil {
-			fmt.Printf("  ⚠ No GPS data – skipped.\n")
+			fmt.Printf("  ⚠ No GPS data – will be saved to no-gps CSV.\n")
+			row := map[string]interface{}{
+				"filename":          d.Name(),
+				"filepath":          path,
+				"relative_filepath": relPathSlash,
+			}
+			for k, v := range meta.Fields {
+				row[k] = v
+			}
+			noGPSRows = append(noGPSRows, row)
 			return nil
 		}
 
@@ -440,13 +456,10 @@ func buildGeoJSON(cfg Config) {
 			alt = *meta.Alt
 		}
 
-		outputDir := filepath.Dir(cfg.OutputFile)
-		relPath, _ := filepath.Rel(outputDir, path)
-
 		props := map[string]interface{}{
 			"filename":          d.Name(),
 			"filepath":          path,
-			"relative_filepath": filepath.ToSlash(relPath),
+			"relative_filepath": relPathSlash,
 		}
 		for k, v := range meta.Fields {
 			props[k] = v
@@ -481,9 +494,86 @@ func buildGeoJSON(cfg Config) {
 		fmt.Printf("Error writing output: %v\n", err)
 		return
 	}
-
 	fmt.Printf("\n✅ GeoJSON created! Found %d valid photos. Saved to %s\n",
 		len(features), cfg.OutputFile)
+
+	// Write no-GPS CSV if there are any such files.
+	if len(noGPSRows) > 0 {
+		writeNoGPSCSV(noGPSRows, outputDir)
+	}
+}
+
+// writeNoGPSCSV writes all files that had no GPS coordinates to a CSV file.
+// Columns are collected dynamically across all rows so no metadata is lost.
+func writeNoGPSCSV(rows []map[string]interface{}, outputDir string) {
+	// ── 1. Collect the union of all column names, preserving a stable order ──
+	seen := make(map[string]bool)
+	// Always put the identifying fields first.
+	fixed := []string{"filename", "filepath", "relative_filepath"}
+	for _, k := range fixed {
+		seen[k] = true
+	}
+	var extra []string
+	for _, row := range rows {
+		for k := range row {
+			if !seen[k] {
+				seen[k] = true
+				extra = append(extra, k)
+			}
+		}
+	}
+	// Sort extra columns for deterministic output.
+	sortStrings(extra)
+	headers := append(fixed, extra...)
+
+	// ── 2. Build and write the CSV ────────────────────────────────────────────
+	csvPath := filepath.Join(outputDir, "no_gps_photos.csv")
+	f, err := os.Create(csvPath)
+	if err != nil {
+		fmt.Printf("writeNoGPSCSV: cannot create file: %v\n", err)
+		return
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	writeCSVRow(w, headers)
+	for _, row := range rows {
+		cells := make([]string, len(headers))
+		for i, h := range headers {
+			cells[i] = csvCell(row[h])
+		}
+		writeCSVRow(w, cells)
+	}
+	w.Flush()
+
+	fmt.Printf("📋 No-GPS photos: %d file(s) saved to %s\n", len(rows), csvPath)
+}
+
+// csvCell converts any value to its CSV cell string representation.
+func csvCell(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	s := fmt.Sprintf("%v", v)
+	// Quote the cell if it contains a comma, quote, or newline.
+	if strings.ContainsAny(s, `,"`+"\n") {
+		s = `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
+}
+
+// writeCSVRow writes one CSV row to the writer.
+func writeCSVRow(w *bufio.Writer, cells []string) {
+	w.WriteString(strings.Join(cells, ",") + "\n")
+}
+
+// sortStrings sorts a string slice in place (avoids importing "sort" for just this).
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 // ════════════════════════════════════════════════════════════════════════════

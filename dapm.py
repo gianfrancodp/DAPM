@@ -39,6 +39,7 @@ import os
 import json
 import re
 import yaml
+import csv
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 import xml.etree.ElementTree as ET
@@ -248,6 +249,8 @@ def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Ph
 
 def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
     features = []
+    no_gps_rows = [] 
+    output_dir = os.path.dirname(OUTPUT_FILE)
     
     # Recursively walk through the target directory to find all JPG/JPEG files
     for root, dirs, files in os.walk(TARGET_DIR):
@@ -257,14 +260,10 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
                 print(f"Analyzing: {filepath}")
                 
                 meta = extract_drone_metadata(filepath)
+                relative_filepath = os.path.relpath(filepath, output_dir)
                 
                 # Add to features only if we have valid GPS data
                 if meta["lat"] is not None and meta["lon"] is not None:
-                    # Build properties dynamically from all metadata keys
-                    # get relative filepath for better portability in the webmap
-                    output_dir = os.path.dirname(OUTPUT_FILE)
-                    relative_filepath = os.path.relpath(filepath, output_dir)
-                    
                     properties = {
                         "filename": file,
                         "filepath": filepath,
@@ -274,13 +273,11 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
                     # Add all metadata fields, handling None and special values
                     for key, value in meta.items():
                         if key not in ["lat", "lon", "alt"]:  # Skip coordinate fields
-                            # Convert None to null for JSON, keep other values as-is
                             if value is None:
                                 properties[key] = None
                             elif isinstance(value, (int, float, str, bool)):
                                 properties[key] = value
                             else:
-                                # Convert other types to string
                                 properties[key] = str(value)
                     
                     feature = {
@@ -292,6 +289,22 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
                         "properties": properties
                     }
                     features.append(feature)
+                else:
+                    # no GPS data found, add to no_gps_rows for CSV output
+                    print("  ⚠️ No GPS data – will be saved to no-gps CSV.")
+                    row = {
+                        "filename": file,
+                        "filepath": filepath,
+                        "relative_filepath": relative_filepath
+                    }
+                    for key, value in meta.items():
+                        if value is None:
+                            row[key] = ""
+                        elif isinstance(value, (int, float, str, bool)):
+                            row[key] = value
+                        else:
+                            row[key] = str(value)
+                    no_gps_rows.append(row)
 
     # Final GeoJSON structure
     geojson_dict = {
@@ -304,8 +317,30 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
         json.dump(geojson_dict, f, indent=4)
     print(f"\n✅ GeoJSON created! Found {len(features)} valid photos. Saved to {OUTPUT_FILE}")
     
-    # Create webmap
-    create_webmap(OUTPUT_FILE)
+    # write no GPS data to CSV if there are any
+    if no_gps_rows:
+        csv_path = os.path.join(output_dir, "no_gps_photos.csv")
+        
+        # extract all unique keys from no_gps_rows to ensure all metadata fields are included in the CSV
+        fixed_headers = ['filename', 'filepath', 'relative_filepath']
+        extra_headers = set()
+        for row in no_gps_rows:
+            for k in row.keys():
+                if k not in fixed_headers:
+                    extra_headers.add(k)
+                    
+        # sort extra headers alphabetically and combine with fixed headers for final CSV header order
+        headers = fixed_headers + sorted(list(extra_headers))
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in no_gps_rows:
+                writer.writerow(row)
+                
+        print(f"📋 No-GPS photos: {len(no_gps_rows)} file(s) saved to {csv_path}")
+
+
 
 # Execution
 if __name__ == "__main__":
