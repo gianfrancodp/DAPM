@@ -1,0 +1,18 @@
+Citing DAPM
+-----------
+
+If you use DAPM in your research or project, please cite it as follows:
+
+DAPM: From Drone Aerial Photos to webMap. 
+Di Pietro G. https://github.com/gianfrancodp/DAPM. 2026.
+
+BibTeX:
+@misc{dapm_tool,
+  author = {Di Pietro, Gianfranco},
+  title = {DAPM: From Drone Aerial Photos to webMap},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/gianfrancodp/DAPM}},
+  note = {Accessed: 2026-05-22}
+}
