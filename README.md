@@ -1,6 +1,6 @@
 # DAPM: from *D*rone *A*erial *P*hotos to web*M*ap
 
-It scans recursively into folders to find Drone Aerial Photos and builds a webMap with locations and other data.
+A file scanner for Drone Aerieal Photos metadata that produce a webmap with you can interact for time and location based searches.
 
 ![readme_assets/DAPM.jpg](readme_assets/DAPM.jpg)
 
@@ -13,7 +13,29 @@ This project is available in two implementations:
 
 ---
 
-## 🛠️ Usage
+## 🛠️ Direct Usage
+
+For *MS Windows* environment an executable binary was compiled in the last relsease:
+1. Go to release page: [Release v.1.1.0](https://github.com/gianfrancodp/DAPM/releases/tag/v.1.1.0)
+2. Download three files:
+   - dapm.exe
+   - input.yaml
+   - template.html
+3. Move it in an executable folder
+4. Change parameters in `input.yaml` file using a common text editor
+    - `TARGET_DIR`: Path to the directory containing your drone aerial photos (supports recursive scanning).
+    - `OUTPUT_FILE`: Path where the GeoJSON database will be saved.
+    - `MAP_TITLE`: Title for the generated web map.
+    - `AUTHOR`: Your name and optional social media handle.
+5. Run in your windows terminal the following command:
+    `.\dapm.exe input.yaml` 
+6. Output file will be:
+    - `index.html` with hardcoded the webGIS with HTML/CSS/JS
+    - `output.geojson` with the same name gived in inputs, that contains the records of all photo with correct geo-tags in metadata
+    - `no_gps_photos.csv` with a list of non-georeferenced photo found.
+7. Enjoy results ✅
+
+## Compile latest version
 
 ### Step 1: Clone the Repository
 
