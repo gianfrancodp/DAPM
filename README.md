@@ -12,6 +12,19 @@ This project is available in two implementations:
 2. **Go (Golang):** A blazingly fast, zero-dependency alternative that uses only the standard library.
 
 ---
+How to cite:
+```Latex
+@misc{dapm_tool,
+  author = {Di Pietro, Gianfranco},
+  title = {DAPM: From Drone Aerial Photos to webMap},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/gianfrancodp/DAPM}},
+  note = {Accessed: 2026-05-22}
+}
+```
+---
 
 ## 🛠️ Direct Usage
 
