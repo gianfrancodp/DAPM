@@ -243,3 +243,29 @@ The core database is a static GeoJSON `FeatureCollection`. Each photo is represe
 ### 4.6 Statistics Panel
 
 * A panel in the bottom right corner displays real-time statistics, including the total number of valid mapped photos and the absolute altitude range in meters.
+
+## Credits and Acknowledgments
+
+This project ("DAPM") is made possible thanks to the open-source community. Below is a list of the third-party libraries and frameworks used:
+
+### Go Backend
+The Go component of this project is built entirely using the Go Standard Library and has **zero external dependencies**.
+
+### Python Scripts
+* **[PyYAML](https://pyyaml.org/)** - Used for YAML parsing and emitting. 
+  * *License:* MIT License
+  * *Author:* Kirill Simonov and PyYAML contributors
+* **[Pillow](https://python-pillow.org/)** - A friendly Python Imaging Library (PIL) fork, used for image and EXIF data processing.
+  * *License:* HPND License
+  * *Author:* Alex Clark and contributors
+
+### Frontend (HTML / CSS / JS)
+* **[Leaflet](https://leafletjs.com/)** - An open-source JavaScript library for mobile-friendly interactive maps.
+  * *License:* BSD 2-Clause License
+  * *Author:* Vladimir Agafonkin and contributors
+* **[Leaflet.draw](https://github.com/Leaflet/Leaflet.draw)** - A plugin for Leaflet that adds support for drawing and editing vectors and polygons on the map.
+  * *License:* MIT License
+  * *Author:* Jacob Toye, Jonatan Heyman, and contributors
+* **[noUiSlider](https://refreshless.com/nouislider/)** - A lightweight, customizable JavaScript range slider.
+  * *License:* MIT License
+  * *Author:* Léon Gersen

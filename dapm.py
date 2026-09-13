@@ -41,6 +41,7 @@ import re
 import yaml
 import csv
 from PIL import Image
+from PIL import ExifTags
 from PIL.ExifTags import TAGS, GPSTAGS
 import xml.etree.ElementTree as ET
 
@@ -188,6 +189,14 @@ def extract_drone_metadata(filepath):
 
             exif_data = image.getexif()
             if exif_data:
+                gps_data = {}
+                try:
+                    gps_ifd = exif_data.get_ifd(ExifTags.IFD.GPSInfo)
+                    if gps_ifd:
+                        gps_data = {GPSTAGS.get(k, k): v for k, v in gps_ifd.items()}
+                except Exception:
+                    gps_data = {}
+
                 for tag_id, value in exif_data.items():
                     tag = TAGS.get(tag_id, tag_id)
                     normalized = normalize_exif_value(value)
@@ -238,24 +247,20 @@ def extract_drone_metadata(filepath):
                         metadata["width"] = int(normalized)
                     elif tag in ["ImageLength", "ExifImageHeight", "PixelYDimension"]:
                         metadata["height"] = int(normalized)
-                    elif tag == "GPSInfo":
-                        gps_data = {}
-                        for t in value:
-                            sub_tag = GPSTAGS.get(t, t)
-                            gps_data[sub_tag] = value[t]
-                        if 'GPSLatitude' in gps_data and 'GPSLongitude' in gps_data:
-                            metadata["lat"] = get_decimal_from_dms(gps_data['GPSLatitude'], gps_data.get('GPSLatitudeRef', 'N'))
-                            metadata["lon"] = get_decimal_from_dms(gps_data['GPSLongitude'], gps_data.get('GPSLongitudeRef', 'E'))
-                        if 'GPSAltitude' in gps_data:
-                            metadata["alt"] = float(gps_data['GPSAltitude'])
-                        if 'GPSDOP' in gps_data:
-                            metadata["gps_dop"] = float(gps_data['GPSDOP'])
-                        if 'GPSSpeed' in gps_data:
-                            metadata["gps_speed"] = float(gps_data['GPSSpeed'])
-                        if 'GPSImgDirection' in gps_data:
-                            metadata["gps_img_direction"] = float(gps_data['GPSImgDirection'])
-                        if 'GPSDestBearing' in gps_data:
-                            metadata["gps_dest_bearing"] = float(gps_data['GPSDestBearing'])
+
+                if 'GPSLatitude' in gps_data and 'GPSLongitude' in gps_data:
+                    metadata["lat"] = get_decimal_from_dms(gps_data['GPSLatitude'], gps_data.get('GPSLatitudeRef', 'N'))
+                    metadata["lon"] = get_decimal_from_dms(gps_data['GPSLongitude'], gps_data.get('GPSLongitudeRef', 'E'))
+                if 'GPSAltitude' in gps_data:
+                    metadata["alt"] = float(gps_data['GPSAltitude'])
+                if 'GPSDOP' in gps_data:
+                    metadata["gps_dop"] = float(gps_data['GPSDOP'])
+                if 'GPSSpeed' in gps_data:
+                    metadata["gps_speed"] = float(gps_data['GPSSpeed'])
+                if 'GPSImgDirection' in gps_data:
+                    metadata["gps_img_direction"] = float(gps_data['GPSImgDirection'])
+                if 'GPSDestBearing' in gps_data:
+                    metadata["gps_dest_bearing"] = float(gps_data['GPSDestBearing'])
 
             if metadata["width"] and metadata["height"]:
                 metadata["megapixels"] = round((metadata["width"] * metadata["height"]) / 1_000_000, 2)

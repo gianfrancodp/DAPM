@@ -73,26 +73,16 @@
             zoomControl: false // Disable default zoom to make room for our custom title, we will re-add it below
         }}).setView([{center_lat}, {center_lon}], 16);
         
-        // Define basemap layers
-        const osmLayer = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+        // Define default basemap layer
+        const imageryLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
             maxZoom: 19,
-            attribution: '© OpenStreetMap contributors',
-            name: 'OpenStreetMap'
-        }});
-        
-        const bingAerialLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-            maxZoom: 19,
-            attribution: '© Esri, DigitalGlobe, Earthstar Geographics',
-            name: 'Bing Aerials'
-        }});
-        
-        // Add OpenStreetMap as default
-        osmLayer.addTo(map);
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+            name: 'World Imagery'
+        }}).addTo(map);
         
         // Create basemap switcher control
         const baseMaps = {{
-            "OpenStreetMap": osmLayer,
-            "Bing Aerials": bingAerialLayer
+            "World Imagery": imageryLayer
         }};
         
         L.control.layers(baseMaps, {{}}, {{ position: 'topright', collapsed: true }}).addTo(map);

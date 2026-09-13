@@ -1,0 +1,4 @@
+TARGET_DIR: 'z:\ALTRO\Software\DroneAerialPhotoMap\DAPM\_verify'
+OUTPUT_FILE: 'z:\ALTRO\Software\DroneAerialPhotoMap\DAPM\_verify\photos.geojson'
+MAP_TITLE: 'Verify Map'
+AUTHOR: 'Copilot'
