@@ -187,11 +187,42 @@ func dmsToDecimal(dms [3]float64, ref string) float64 {
 
 // exifResult holds the EXIF values we care about.
 type exifResult struct {
-	DateTime string
-	Camera   string
-	Lat      *float64
-	Lon      *float64
-	Alt      *float64
+	DateTime          string
+	DateTimeDigitized string
+	Camera            string
+	Make              string
+	Software          string
+	LensModel         string
+	Artist            string
+	Copyright         string
+	ImageDescription  string
+	Orientation       int
+	ExposureTime      float64
+	FNumber           float64
+	ISO               int
+	ExposureBias      float64
+	Flash             string
+	FocalLength       float64
+	FocalLength35mm   float64
+	MeteringMode      int
+	WhiteBalance      int
+	ColorSpace        int
+	GPSDOP            float64
+	GPSSpeed          float64
+	GPSImgDirection   float64
+	GPSDestBearing    float64
+	Lat               *float64
+	Lon               *float64
+	Alt               *float64
+	Width             int
+	Height            int
+}
+
+func computeMegapixels(width, height int) float64 {
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	return float64(width*height) / 1_000_000.0
 }
 
 // extractEXIF scans JPEG segments for an APP1/Exif block and parses it.
@@ -245,11 +276,33 @@ func parseTIFFExif(data []byte) *exifResult {
 	var exifOff, gpsOff uint32
 	var hasExif, hasGPS bool
 
-	// ── IFD0: camera model + sub-IFD pointers ──────────────────────────────
+	// ── IFD0: common image data + sub-IFD pointers ─────────────────────────
 	for _, e := range tr.readIFD(ifd0Off) {
 		switch e.tag {
+		case 0x0100: // ImageWidth
+			if e.count == 1 {
+				result.Width = int(e.offset)
+			}
+		case 0x0101: // ImageLength
+			if e.count == 1 {
+				result.Height = int(e.offset)
+			}
+		case 0x010E: // ImageDescription
+			result.ImageDescription = tr.ascii(e.count, e.rawVal, e.offset)
+		case 0x010F: // Make
+			result.Make = tr.ascii(e.count, e.rawVal, e.offset)
 		case 0x0110: // Model
 			result.Camera = tr.ascii(e.count, e.rawVal, e.offset)
+		case 0x0112: // Orientation
+			result.Orientation = int(e.offset)
+		case 0x0131: // Software
+			result.Software = tr.ascii(e.count, e.rawVal, e.offset)
+		case 0x0132: // DateTime
+			result.DateTime = tr.ascii(e.count, e.rawVal, e.offset)
+		case 0x013B: // Artist
+			result.Artist = tr.ascii(e.count, e.rawVal, e.offset)
+		case 0x8298: // Copyright
+			result.Copyright = tr.ascii(e.count, e.rawVal, e.offset)
 		case 0x8769: // ExifIFD pointer
 			exifOff, hasExif = e.offset, true
 		case 0x8825: // GPS IFD pointer
@@ -257,11 +310,74 @@ func parseTIFFExif(data []byte) *exifResult {
 		}
 	}
 
-	// ── ExifIFD: DateTimeOriginal ───────────────────────────────────────────
+	// ── ExifIFD: standard camera/exposure tags plus pixel dimensions ──────
 	if hasExif {
 		for _, e := range tr.readIFD(int(exifOff)) {
-			if e.tag == 0x9003 { // DateTimeOriginal
+			switch e.tag {
+			case 0x9003: // DateTimeOriginal
 				result.DateTime = tr.ascii(e.count, e.rawVal, e.offset)
+			case 0x9004: // DateTimeDigitized
+				result.DateTimeDigitized = tr.ascii(e.count, e.rawVal, e.offset)
+			case 0x9201: // Shutter speed (ExposureTime) — usually rational
+				if e.count == 1 {
+					result.ExposureTime = tr.rational(int(e.offset))
+				}
+			case 0x829A: // ExposureTime
+				if e.count == 1 {
+					result.ExposureTime = tr.rational(int(e.offset))
+				}
+			case 0x829D: // FNumber
+				if e.count == 1 {
+					result.FNumber = tr.rational(int(e.offset))
+				}
+			case 0x8822: // ExposureProgram
+			case 0x8827: // ISO speed
+				if e.count == 1 {
+					result.ISO = int(tr.u16(int(e.offset)))
+				}
+			case 0x9202: // ApertureValue
+			case 0x9204: // ExposureBiasValue
+				if e.count == 1 {
+					result.ExposureBias = tr.rational(int(e.offset))
+				}
+			case 0x9209: // Flash
+				result.Flash = tr.ascii(e.count, e.rawVal, e.offset)
+			case 0x920A: // FocalLength
+				if e.count == 1 {
+					result.FocalLength = tr.rational(int(e.offset))
+				}
+			case 0xA432: // LensSpecification
+			case 0xA433: // LensModel
+				result.LensModel = tr.ascii(e.count, e.rawVal, e.offset)
+			case 0xA435: // LensMake
+			case 0xA005: // InteroperabilityOffset
+			case 0xA001: // ColorSpace
+				if e.count == 1 {
+					result.ColorSpace = int(tr.u16(int(e.offset)))
+				}
+			case 0xA002: // PixelXDimension / ExifImageWidth
+				if e.count == 1 {
+					result.Width = int(e.offset)
+				}
+			case 0xA003: // PixelYDimension / ExifImageHeight
+				if e.count == 1 {
+					result.Height = int(e.offset)
+				}
+			case 0x9207: // MeteringMode
+				if e.count == 1 {
+					result.MeteringMode = int(tr.u16(int(e.offset)))
+				}
+			case 0x9208: // LightSource
+			case 0xA406: // LensInfo / 35mm focal length likely stored here in some cameras
+				if e.count == 1 {
+					result.FocalLength35mm = tr.rational(int(e.offset))
+				}
+			case 0xA407: // FlashEnergy
+			case 0xA401: // CustomRendered
+			case 0xA403: // WhiteBalance
+				if e.count == 1 {
+					result.WhiteBalance = int(tr.u16(int(e.offset)))
+				}
 			}
 		}
 	}
@@ -284,9 +400,26 @@ func parseTIFFExif(data []byte) *exifResult {
 			case 0x0004: // GPSLongitude – 3 RATIONALs
 				lonDMS = tr.rationals3(e.offset)
 				hasLon = true
+			case 0x0005: // GPSAltitudeRef
 			case 0x0006: // GPSAltitude – 1 RATIONAL
 				alt := tr.rational(int(e.offset))
 				result.Alt = &alt
+			case 0x000B: // GPSDOP
+				if e.count == 1 {
+					result.GPSDOP = tr.rational(int(e.offset))
+				}
+			case 0x000D: // GPSSpeed
+				if e.count == 1 {
+					result.GPSSpeed = tr.rational(int(e.offset))
+				}
+			case 0x0017: // GPSImgDirection
+				if e.count == 1 {
+					result.GPSImgDirection = tr.rational(int(e.offset))
+				}
+			case 0x0019: // GPSDestBearing
+				if e.count == 1 {
+					result.GPSDestBearing = tr.rational(int(e.offset))
+				}
 			}
 		}
 
@@ -358,8 +491,80 @@ func extractMetadata(filePath string) Metadata {
 		if exif.DateTime != "" {
 			meta.Fields["datetime"] = exif.DateTime
 		}
+		if exif.DateTimeDigitized != "" {
+			meta.Fields["date_time_digitized"] = exif.DateTimeDigitized
+		}
 		if exif.Camera != "" {
 			meta.Fields["camera"] = exif.Camera
+		}
+		if exif.Make != "" {
+			meta.Fields["make"] = exif.Make
+		}
+		if exif.Software != "" {
+			meta.Fields["software"] = exif.Software
+		}
+		if exif.LensModel != "" {
+			meta.Fields["lens_model"] = exif.LensModel
+		}
+		if exif.Artist != "" {
+			meta.Fields["artist"] = exif.Artist
+		}
+		if exif.Copyright != "" {
+			meta.Fields["copyright"] = exif.Copyright
+		}
+		if exif.ImageDescription != "" {
+			meta.Fields["image_description"] = exif.ImageDescription
+		}
+		if exif.Orientation > 0 {
+			meta.Fields["orientation"] = exif.Orientation
+		}
+		if exif.ExposureTime > 0 {
+			meta.Fields["exposure_time"] = exif.ExposureTime
+		}
+		if exif.FNumber > 0 {
+			meta.Fields["f_number"] = exif.FNumber
+		}
+		if exif.ISO > 0 {
+			meta.Fields["iso"] = exif.ISO
+		}
+		if exif.ExposureBias != 0 {
+			meta.Fields["exposure_bias"] = exif.ExposureBias
+		}
+		if exif.Flash != "" {
+			meta.Fields["flash"] = exif.Flash
+		}
+		if exif.FocalLength > 0 {
+			meta.Fields["focal_length"] = exif.FocalLength
+		}
+		if exif.FocalLength35mm > 0 {
+			meta.Fields["focal_length_35mm"] = exif.FocalLength35mm
+		}
+		if exif.MeteringMode > 0 {
+			meta.Fields["metering_mode"] = exif.MeteringMode
+		}
+		if exif.WhiteBalance > 0 {
+			meta.Fields["white_balance"] = exif.WhiteBalance
+		}
+		if exif.ColorSpace > 0 {
+			meta.Fields["color_space"] = exif.ColorSpace
+		}
+		if exif.GPSDOP > 0 {
+			meta.Fields["gps_dop"] = exif.GPSDOP
+		}
+		if exif.GPSSpeed > 0 {
+			meta.Fields["gps_speed"] = exif.GPSSpeed
+		}
+		if exif.GPSImgDirection > 0 {
+			meta.Fields["gps_img_direction"] = exif.GPSImgDirection
+		}
+		if exif.GPSDestBearing > 0 {
+			meta.Fields["gps_dest_bearing"] = exif.GPSDestBearing
+		}
+		if exif.Width > 0 && exif.Height > 0 {
+			meta.Fields["width"] = exif.Width
+			meta.Fields["height"] = exif.Height
+			meta.Fields["megapixels"] = computeMegapixels(exif.Width, exif.Height)
+			meta.Fields["mp"] = computeMegapixels(exif.Width, exif.Height)
 		}
 		meta.Lat = exif.Lat
 		meta.Lon = exif.Lon
@@ -385,6 +590,14 @@ func extractMetadata(filePath string) Metadata {
 					meta.Fields[k] = v
 				}
 			}
+		}
+	}
+
+	if exif := extractEXIF(raw); exif != nil {
+		if exif.Width > 0 && exif.Height > 0 {
+			meta.Fields["width"] = exif.Width
+			meta.Fields["height"] = exif.Height
+			meta.Fields["megapixels"] = computeMegapixels(exif.Width, exif.Height)
 		}
 	}
 

@@ -104,148 +104,277 @@ def parse_xmp_data(xmp_string):
     
     return xmp_dict
 
+def normalize_exif_value(value):
+    """Normalize EXIF values for JSON/CSV export."""
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        try:
+            return value.decode('utf-8', 'ignore').replace('\x00', '').strip()
+        except Exception:
+            return value.decode('latin-1', 'ignore').replace('\x00', '').strip()
+    if hasattr(value, 'numerator') and hasattr(value, 'denominator'):
+        denominator = getattr(value, 'denominator', 0)
+        numerator = getattr(value, 'numerator', 0)
+        if denominator:
+            return round(float(numerator) / float(denominator), 6)
+        return float(numerator)
+    if isinstance(value, tuple):
+        if len(value) == 2 and all(isinstance(v, (int, float)) for v in value):
+            if value[1] != 0:
+                return round(float(value[0]) / float(value[1]), 6)
+            return float(value[0])
+        if all(isinstance(v, (int, float)) for v in value):
+            return [float(v) for v in value]
+    if isinstance(value, list):
+        if all(isinstance(v, (int, float)) for v in value):
+            return [float(v) for v in value]
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    return str(value).replace('\x00', '').strip()
+
+
 def extract_drone_metadata(filepath):
-    """Extract EXIF metadata and parse XMP data for drone photos"""
+    """Extract EXIF metadata and parse XMP data for drone photos."""
     metadata = {
         "lat": None, "lon": None, "alt": None,
         "datetime": "unknown",
         "camera": "unknown",
-        "gimbal_pitch": None
+        "make": None,
+        "software": None,
+        "lens_model": None,
+        "date_time_digitized": None,
+        "exposure_time": None,
+        "f_number": None,
+        "iso": None,
+        "flash": None,
+        "focal_length": None,
+        "focal_length_35mm": None,
+        "orientation": None,
+        "image_description": None,
+        "artist": None,
+        "copyright": None,
+        "metering_mode": None,
+        "white_balance": None,
+        "color_space": None,
+        "exposure_bias": None,
+        "gimbal_pitch": None,
+        "gimbal_roll": None,
+        "gimbal_yaw": None,
+        "flight_yaw": None,
+        "relative_altitude": None,
+        "absolute_altitude": None,
+        "camera_pitch": None,
+        "camera_yaw": None,
+        "camera_roll": None,
+        "gps_dop": None,
+        "gps_speed": None,
+        "gps_img_direction": None,
+        "gps_dest_bearing": None,
+        "width": None,
+        "height": None,
+        "megapixels": None,
+        "mp": None,
     }
-    
-    try:
-        # 1. Standard EXIF extraction
-        image = Image.open(filepath)
-        exif_data = image._getexif()
-        
-        if exif_data:
-            for tag_id, value in exif_data.items():
-                tag = TAGS.get(tag_id, tag_id)
-                if tag == "DateTimeOriginal":
-                    metadata["datetime"] = value
-                elif tag == "Model":
-                    metadata["camera"] = str(value).replace('\x00', '').strip()
-                    # metadata["camera"] = value
-                elif tag == "GPSInfo":
-                    gps_data = {}
-                    for t in value:
-                        sub_tag = GPSTAGS.get(t, t)
-                        gps_data[sub_tag] = value[t]
-                    
-                    if 'GPSLatitude' in gps_data and 'GPSLongitude' in gps_data:
-                        metadata["lat"] = get_decimal_from_dms(gps_data['GPSLatitude'], gps_data.get('GPSLatitudeRef', 'N'))
-                        metadata["lon"] = get_decimal_from_dms(gps_data['GPSLongitude'], gps_data.get('GPSLongitudeRef', 'E'))
-                    if 'GPSAltitude' in gps_data:
-                        metadata["alt"] = float(gps_data['GPSAltitude'])
 
-        # 2. Extract Gimbal/Drone data from XMP (Regex approach for DJI JPG files)
-        # with open(filepath, "rb") as f:
-        #     img_data = f.read()
-        #     # Try to find GimbalPitchDegree in the XMP metadata
-        #     pitch_match = re.search(b'GimbalPitchDegree="([^"]+)"', img_data)
-        #     if pitch_match:
-        #         metadata["gimbal_pitch"] = float(pitch_match.group(1).decode('utf-8'))
-        #     # Try to find FlightYawDegree (Drone Yaw) in the XMP metadata
-        #     yaw_match = re.search(b'FlightYawDegree="([^"]+)"', img_data)
-        #     if yaw_match:
-        #         metadata["drone_yaw"] = float(yaw_match.group(1).decode('utf-8'))
+    try:
+        with Image.open(filepath) as image:
+            width, height = image.size
+            metadata["width"] = width
+            metadata["height"] = height
+            if width and height:
+                metadata["megapixels"] = round((width * height) / 1_000_000, 2)
+                metadata["mp"] = metadata["megapixels"]
+
+            exif_data = image.getexif()
+            if exif_data:
+                for tag_id, value in exif_data.items():
+                    tag = TAGS.get(tag_id, tag_id)
+                    normalized = normalize_exif_value(value)
+
+                    if tag == "DateTimeOriginal":
+                        metadata["datetime"] = normalized
+                    elif tag == "DateTimeDigitized":
+                        metadata["date_time_digitized"] = normalized
+                    elif tag == "DateTime":
+                        metadata["datetime"] = normalized
+                    elif tag == "Make":
+                        metadata["make"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "Model":
+                        metadata["camera"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "Software":
+                        metadata["software"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "LensModel":
+                        metadata["lens_model"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "ExposureTime":
+                        metadata["exposure_time"] = normalized
+                    elif tag == "FNumber":
+                        metadata["f_number"] = normalized
+                    elif tag in ["ISOSpeedRatings", "ISOSpeed"]:
+                        metadata["iso"] = normalized
+                    elif tag == "Flash":
+                        metadata["flash"] = normalized
+                    elif tag == "FocalLength":
+                        metadata["focal_length"] = normalized
+                    elif tag == "FocalLengthIn35mmFilm":
+                        metadata["focal_length_35mm"] = normalized
+                    elif tag == "Orientation":
+                        metadata["orientation"] = normalized
+                    elif tag == "ImageDescription":
+                        metadata["image_description"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "Artist":
+                        metadata["artist"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "Copyright":
+                        metadata["copyright"] = str(normalized).replace('\x00', '').strip() if normalized is not None else None
+                    elif tag == "MeteringMode":
+                        metadata["metering_mode"] = normalized
+                    elif tag == "WhiteBalance":
+                        metadata["white_balance"] = normalized
+                    elif tag == "ColorSpace":
+                        metadata["color_space"] = normalized
+                    elif tag == "ExposureBiasValue":
+                        metadata["exposure_bias"] = normalized
+                    elif tag in ["ImageWidth", "ExifImageWidth", "PixelXDimension"]:
+                        metadata["width"] = int(normalized)
+                    elif tag in ["ImageLength", "ExifImageHeight", "PixelYDimension"]:
+                        metadata["height"] = int(normalized)
+                    elif tag == "GPSInfo":
+                        gps_data = {}
+                        for t in value:
+                            sub_tag = GPSTAGS.get(t, t)
+                            gps_data[sub_tag] = value[t]
+                        if 'GPSLatitude' in gps_data and 'GPSLongitude' in gps_data:
+                            metadata["lat"] = get_decimal_from_dms(gps_data['GPSLatitude'], gps_data.get('GPSLatitudeRef', 'N'))
+                            metadata["lon"] = get_decimal_from_dms(gps_data['GPSLongitude'], gps_data.get('GPSLongitudeRef', 'E'))
+                        if 'GPSAltitude' in gps_data:
+                            metadata["alt"] = float(gps_data['GPSAltitude'])
+                        if 'GPSDOP' in gps_data:
+                            metadata["gps_dop"] = float(gps_data['GPSDOP'])
+                        if 'GPSSpeed' in gps_data:
+                            metadata["gps_speed"] = float(gps_data['GPSSpeed'])
+                        if 'GPSImgDirection' in gps_data:
+                            metadata["gps_img_direction"] = float(gps_data['GPSImgDirection'])
+                        if 'GPSDestBearing' in gps_data:
+                            metadata["gps_dest_bearing"] = float(gps_data['GPSDestBearing'])
+
+            if metadata["width"] and metadata["height"]:
+                metadata["megapixels"] = round((metadata["width"] * metadata["height"]) / 1_000_000, 2)
+                metadata["mp"] = metadata["megapixels"]
+
         with open(filepath, "rb") as f:
             img_data = f.read()
-            
-            # Find XMP metadata block
             xmp_start = img_data.find(b'<x:xmpmeta')
             if xmp_start != -1:
                 xmp_end = img_data.find(b'</x:xmpmeta>', xmp_start)
                 if xmp_end != -1:
                     xmp_data = img_data[xmp_start:xmp_end+12].decode('utf-8', errors='ignore')
                     xmp_dict = parse_xmp_data(xmp_data)
-                    
-                    # Add all XMP data to metadata, converting numeric strings where appropriate
                     for key, value in xmp_dict.items():
-                        if key not in metadata:  # Don't override existing keys
-                            # Try to convert to float if it looks like a number
+                        if key in ('GimbalPitchDegree', 'GimbalPitch'):
+                            metadata['gimbal_pitch'] = float(value)
+                        elif key in ('GimbalRollDegree', 'GimbalRoll'):
+                            metadata['gimbal_roll'] = float(value)
+                        elif key in ('GimbalYawDegree', 'GimbalYaw'):
+                            metadata['gimbal_yaw'] = float(value)
+                        elif key in ('FlightYawDegree', 'FlightYaw', 'Yaw'):
+                            metadata['flight_yaw'] = float(value)
+                        elif key in ('RelativeAltitude', 'RelativeAltitudeM'):
+                            metadata['relative_altitude'] = float(value)
+                        elif key in ('AbsoluteAltitude', 'AbsoluteAltitudeM'):
+                            metadata['absolute_altitude'] = float(value)
+                        elif key in ('CameraPitchDegree', 'CameraPitch'):
+                            metadata['camera_pitch'] = float(value)
+                        elif key in ('CameraYawDegree', 'CameraYaw'):
+                            metadata['camera_yaw'] = float(value)
+                        elif key in ('CameraRollDegree', 'CameraRoll'):
+                            metadata['camera_roll'] = float(value)
+                        elif key == 'Model' and metadata.get('camera') == 'unknown':
+                            metadata['camera'] = str(value)
+                        elif key == 'LensModel' and metadata.get('lens_model') is None:
+                            metadata['lens_model'] = str(value)
+                        elif key not in metadata:
                             try:
                                 metadata[key] = float(value)
                             except (ValueError, TypeError):
                                 metadata[key] = value
     except Exception as e:
         print(f"Error processing {filepath}: {e}")
-        
+
     return metadata
 
-def create_webmap(geojson_file, output_html='index.html', title="Drone Aerial Photo Map", author="Gianfranco Di Pietro"):
-    """Create an interactive Leaflet.js webmap from GeoJSON data"""
-    
-    # Read GeoJSON to calculate bounds and center
+
+def create_webmap(geojson_file, output_html='index.html', title='Drone Photo Map', author='DAPM'):
+    """Create the Leaflet HTML map based on a GeoJSON file."""
     with open(geojson_file, 'r', encoding='utf-8') as f:
         geojson_data = json.load(f)
-    
-    # Calculate center and bounds from features
+
+    features = geojson_data.get('features', [])
+    if not features:
+        print('⚠️ No valid features available for webmap generation.')
+        return None
+
     lats = []
     lons = []
     alts = []
-    for feature in geojson_data.get('features', []):
+    for feature in features:
         coords = feature['geometry']['coordinates']
         lons.append(coords[0])
         lats.append(coords[1])
         if len(coords) > 2 and coords[2] is not None:
             alts.append(coords[2])
-    
+
     if not lats or not lons:
-        print("⚠️ No valid GPS coordinates found for map center")
-        return
-    
+        print('⚠️ No valid GPS coordinates found for map center')
+        return None
+
     center_lat = sum(lats) / len(lats)
     center_lon = sum(lons) / len(lons)
-    
-    # Calculate altitude range for colormap
+
     min_alt = min(alts) if alts else 0
     max_alt = max(alts) if alts else 100
     alt_range = max_alt - min_alt if max_alt > min_alt else 1
-    
-    # Extract and parse datetime values
+
     datetimes = []
-    for feature in geojson_data.get('features', []):
+    for feature in features:
         dt_str = feature['properties'].get('datetime', 'unknown')
         if dt_str and dt_str != 'unknown':
-            try:
-                # Try to parse datetime (format: YYYY-MM-DD HH:MM:SS or similar)
-                datetimes.append(dt_str)
-            except:
-                pass
-    
-    # Get min/max datetime (lexicographic sorting works for ISO format)
+            datetimes.append(dt_str)
+
     if datetimes:
         datetimes_sorted = sorted(datetimes)
         min_datetime = datetimes_sorted[0]
         max_datetime = datetimes_sorted[-1]
     else:
-        min_datetime = "unknown"
-        max_datetime = "unknown"
-    
-    # Load HTML template and format with values
+        min_datetime = 'unknown'
+        max_datetime = 'unknown'
+
     template_path = os.path.join(os.path.dirname(__file__), 'template.html')
     with open(template_path, 'r', encoding='utf-8') as f:
         html_template = f.read()
-    
+
     html_content = html_template.format(
         title=title,
         center_lat=center_lat,
         center_lon=center_lon,
         geojsonFile=os.path.basename(geojson_file),
         geojsonData=json.dumps(geojson_data),
-        author=author
+        author=author,
+        min_alt=min_alt,
+        max_alt=max_alt,
+        alt_range=alt_range,
+        min_datetime=min_datetime,
+        max_datetime=max_datetime,
     )
-    
-    # Write HTML file
-    output_dir = os.path.dirname(OUTPUT_FILE)
+
+    output_dir = os.path.dirname(geojson_file)
     webmap_file = os.path.join(output_dir, output_html)
-    
     with open(webmap_file, 'w', encoding='utf-8') as f:
         f.write(html_content)
-    
+
     print(f"✅ Webmap created: {webmap_file}")
     print(f"   Open it in your browser: file://{os.path.abspath(webmap_file)}")
+    return webmap_file
+
 
 def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
     features = []

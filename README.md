@@ -2,6 +2,17 @@
 
 A file scanner for Drone Aerieal Photos metadata that produce a webmap with you can interact for time and location based searches.
 
+## Quick Start
+
+1. Edit your configuration file (`input.yaml`).
+2. Run the Windows executable:
+
+```powershell
+.\dapm.exe input.yaml
+```
+
+> This command loads the YAML settings, scans the target folder for JPG/JPEG images, extracts GPS and EXIF/XMP metadata, and generates the map and GeoJSON outputs.
+
 ![readme_assets/DAPM.jpg](readme_assets/DAPM.jpg)
 
 ## 🚀 Available Versions
@@ -21,7 +32,7 @@ How to cite:
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/gianfrancodp/DAPM}},
-  note = {Accessed: 2026-05-22}
+  note = {Accessed: 2026-09-13}
 }
 ```
 ---
