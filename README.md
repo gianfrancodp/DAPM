@@ -2,18 +2,52 @@
 
 A file scanner for Drone Aerieal Photos metadata that produce a webmap with you can interact for time and location based searches.
 
+## Output field reference
+
+See [OUTPUT_FIELDS.md](OUTPUT_FIELDS.md) for the schema-2 field definitions shared by the Go and Python implementations, including namespace rules, units, examples, missing-value rules, and official references. [OUTPUT_SCHEMA.json](OUTPUT_SCHEMA.json) is the machine-readable JSON Schema for GeoJSON and shapefile field-mapping sidecars. Existing exports affected by the metadata bugs must be regenerated from the original JPEGs.
+
 ## Quick Start
 
-1. Edit your configuration file (`input.yaml`).
+1. Edit <code>src/golang/input.yaml</code>.
 2. Run the Windows executable:
 
-```powershell
-.\dapm.exe input.yaml
-```
+~~~powershell
+.\build\dapm.exe .\src\golang\input.yaml
+~~~
 
-> This command loads the YAML settings, scans the target folder for JPG/JPEG images, extracts GPS and EXIF/XMP metadata, and generates the map and GeoJSON outputs.
+This loads the YAML settings, scans JPG/JPEG files, extracts GPS and EXIF/XMP metadata, and generates all schema-2 outputs.
 
 ![readme_assets/DAPM.jpg](readme_assets/DAPM.jpg)
+
+## Repository layout
+
+~~~text
+DAPM/
+├── README.md
+├── LICENSE
+├── CITATION
+├── OUTPUT_FIELDS.md
+├── OUTPUT_SCHEMA.json
+├── build/
+│   ├── dapm.exe
+│   ├── dapm-mac-intel
+│   ├── dapm-mac-arm64
+│   └── template.html
+└── src/
+    ├── golang/
+    │   ├── main.go
+    │   ├── exports.go
+    │   ├── metadata_test.go
+    │   ├── go.mod
+    │   ├── build_it.bat
+    │   └── input.yaml
+    └── python/
+        ├── dapm.py
+        ├── test_dapm.py
+        ├── requirements.txt
+        ├── input-test.yaml
+        └── environment/
+~~~
 
 ## 🚀 Available Versions
 
@@ -39,96 +73,48 @@ How to cite:
 
 ## 🛠️ Direct Usage
 
-For *MS Windows* environment an executable binary was compiled in the last relsease:
-1. Go to release page: [Release v.1.1.0](https://github.com/gianfrancodp/DAPM/releases/tag/v.1.1.0)
-2. Download three files:
-   - dapm.exe
-   - input.yaml
-   - template.html
-3. Move it in an executable folder
-4. Change parameters in `input.yaml` file using a common text editor
-    - `TARGET_DIR`: Path to the directory containing your drone aerial photos (supports recursive scanning).
-    - `OUTPUT_FILE`: Path where the GeoJSON database will be saved.
-    - `MAP_TITLE`: Title for the generated web map.
-    - `AUTHOR`: Your name and optional social media handle.
-5. Run in your windows terminal the following command:
-    `.\dapm.exe input.yaml` 
-6. Output file will be:
-    - `index.html` with hardcoded the webGIS with HTML/CSS/JS
-    - `output.geojson` with the same name gived in inputs, that contains the records of all photo with correct geo-tags in metadata
-    - `no_gps_photos.csv` with a list of non-georeferenced photo found.
-7. Enjoy results ✅
+For Windows, keep <code>dapm.exe</code> and <code>template.html</code> together. The repository already places them in <code>build</code>. Edit <code>src/golang/input.yaml</code> and run:
 
-## Compile latest version
+~~~powershell
+.\build\dapm.exe .\src\golang\input.yaml
+~~~
 
-### Step 1: Clone the Repository
+The generated files are <code>index.html</code>, the configured GeoJSON, the matching CSV and shapefile components, the DBF <code>.fields.json</code> mapping, and <code>no_gps_photos.csv</code> when photographs lack valid EXIF coordinates.
 
-Clone this repository to your local machine:
+## Compile and run
 
-```bash
+### Step 1: Clone the repository
+
+~~~bash
 git clone https://github.com/gianfrancodp/DAPM
 cd DAPM
+~~~
 
-```
+### Step 2: Configure
 
-### Step 2: Configuration (Both Versions)
+Both implementations use YAML. Go includes <code>src/golang/input.yaml</code>; Python includes <code>src/python/input-test.yaml</code>. Set <code>TARGET_DIR</code>, <code>OUTPUT_FILE</code>, <code>MAP_TITLE</code>, and <code>AUTHOR</code>.
 
-Both the Python and Go versions rely on a simple YAML configuration file (e.g., `input-test.yaml`). Open it in your text editor and update the following variables:
+### Step 3: Run Python
 
-* `TARGET_DIR`: Path to the directory containing your drone aerial photos (supports recursive scanning).
-* `OUTPUT_FILE`: Path where the GeoJSON database will be saved.
-* `MAP_TITLE`: Title for the generated web map.
-* `AUTHOR`: Your name and optional social media handle.
+Create the environment in its designated folder, install the manifest, and run the script:
 
-### Step 3: Run the Script
+~~~powershell
+python -m venv .\src\python\environment
+.\src\python\environment\Scripts\Activate.ps1
+pip install -r .\src\python\requirements.txt
+python .\src\python\dapm.py .\src\python\input-test.yaml
+~~~
 
-#### Option A: Using Python
+### Step 4: Build and run Go
 
-**Prerequisites:** Python 3.6+
+The build script writes Windows and macOS executables to <code>build</code>:
 
-1. Create and activate a virtual environment:
-```bash
-python -m venv .
-source bin/activate  # On Windows: bin\activate
+~~~powershell
+.\src\golang\build_it.bat
+.\build\dapm.exe .\src\golang\input.yaml
+~~~
 
-```
-
-
-2. Install dependencies:
-```bash
-pip install Pillow pyyaml
-
-```
-
-
-3. Run the script:
-```bash
-python dapm.py
-
-```
-
-
-
-#### Option B: Using Go (Zero Dependencies)
-
-**Prerequisites:** Go installed on your system.
-
-1. Build the executable:
-```bash
-go build -o dapm .
-
-```
-
-
-2. Run the executable passing the configuration file as an argument:
-```bash
-./dapm input-test.yaml
-
-```
-
-
-
-### Step 4: View the Results
+### Step 5: View the Results
 
 1. Open the generated `index.html` file in your web browser (located in the same folder as your output GeoJSON).
 2. Explore the interactive map with your drone photo locations.
@@ -144,8 +130,8 @@ This project is a Geographic Information System (GIS) tool designed to index, vi
 
 The system is built as a static file generator utilizing Python or Go for data processing, and a combination of JavaScript libraries for the frontend interface.
 
-* **Data Processing:** A standalone script (`dapm.py` or `main.go`) that recursively scans directories of drone images, extracting EXIF GPS coordinates, timestamps, and all available XMP metadata (Yaw, Gimbal Pitch, etc.).
-* **Frontend (JavaScript/HTML):** The script generates a standalone `index.html` file that utilizes **Leaflet.js** for map rendering, **noUiSlider** for time filtering, and **Leaflet.Draw** for user selection.
+* **Data Processing:** <code>src/python/dapm.py</code> and <code>src/golang/main.go</code> recursively scan drone images and extract EXIF GPS, timestamps and namespace-aware XMP metadata.
+* **Frontend (JavaScript/HTML):** <code>build/template.html</code> generates a standalone <code>index.html</code> using **Leaflet.js**, **noUiSlider** and **Leaflet.Draw**.
 
 ### 2.1 Data Flow Architecture
 
@@ -201,10 +187,12 @@ The core database is a static GeoJSON `FeatureCollection`. Each photo is represe
     "filename": "DJI_0001.JPG",
     "filepath": "/path/to/drones/DJI_0001.JPG",
     "relative_filepath": "DJI_0001.JPG",
+    "dapm_version": "1.1.2",
+    "dapm_schema_version": "2",
     "datetime": "2026-04-05 14:30:00",
-    "camera": "FC3170",
-    "FlightYawDegree": 14.5,
-    "GimbalPitchDegree": -90.0
+    "xmp_tiff_Model": "FC3170",
+    "xmp_drone_dji_FlightYawDegree": 14.5,
+    "xmp_drone_dji_GimbalPitchDegree": -90.0
   }
 }
 

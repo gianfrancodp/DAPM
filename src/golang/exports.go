@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -17,6 +18,19 @@ import (
 type dbfColumn struct {
 	Name, Source string
 	Width        byte
+}
+
+type dbfFieldMapping struct {
+	DBFName    string `json:"dbf_name"`
+	SourceName string `json:"source_name"`
+	DBFType    string `json:"dbf_type"`
+	Width      int    `json:"width"`
+}
+
+type dbfFieldMappingFile struct {
+	DAPMVersion       string            `json:"dapm_version"`
+	DAPMSchemaVersion string            `json:"dapm_schema_version"`
+	Fields            []dbfFieldMapping `json:"fields"`
 }
 
 func exportValidData(features []geoFeature, output string) {
@@ -104,7 +118,29 @@ func exportShapefile(features []geoFeature, headers []string, base string) error
 	}
 	os.WriteFile(base+".prj", []byte("GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]"), 0644)
 	os.WriteFile(base+".cpg", []byte("UTF-8\n"), 0644)
-	return nil
+	return writeDBFFieldMapping(cols, base+".fields.json")
+}
+
+func writeDBFFieldMapping(cols []dbfColumn, path string) error {
+	fields := make([]dbfFieldMapping, len(cols))
+	for i, col := range cols {
+		fields[i] = dbfFieldMapping{
+			DBFName:    col.Name,
+			SourceName: col.Source,
+			DBFType:    "C",
+			Width:      int(col.Width),
+		}
+	}
+	payload, err := json.MarshalIndent(dbfFieldMappingFile{
+		DAPMVersion:       dapmVersion,
+		DAPMSchemaVersion: dapmSchemaVersion,
+		Fields:            fields,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	payload = append(payload, '\n')
+	return os.WriteFile(path, payload, 0644)
 }
 
 func dbfName(s string, used map[string]bool) string {

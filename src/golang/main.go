@@ -8,20 +8,28 @@ package main
 // properties use EXIF_ and XMP_ prefixes. Legacy mp, make, and camera fields
 // are omitted from output; photos without valid EXIF coordinates go to no_gps_photos.csv.
 //
-// Usage:  dapm input.yaml
-// Build:  go build -o dapm.exe .
+// Usage:  ../../build/dapm.exe input.yaml
+// Build:  build_it.bat
 
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+)
+
+const (
+	dapmVersion       = "1.1.2"
+	dapmSchemaVersion = "2"
 )
 
 // Config holds the values from the YAML file.
@@ -95,56 +103,107 @@ type tiffReader struct {
 }
 
 func (r *tiffReader) u16(off int) uint16 {
-	if off+2 > len(r.data) {
+	if off < 0 || off > len(r.data)-2 {
 		return 0
 	}
 	return r.order.Uint16(r.data[off : off+2])
 }
 
 func (r *tiffReader) u32(off int) uint32 {
-	if off+4 > len(r.data) {
+	if off < 0 || off > len(r.data)-4 {
 		return 0
 	}
 	return r.order.Uint32(r.data[off : off+4])
 }
 
-// rational reads a TIFF RATIONAL (two consecutive uint32) at the given offset.
-func (r *tiffReader) rational(off int) float64 {
-	if off+8 > len(r.data) {
-		return 0
+// valueBytes resolves TIFF inline values and offsets using the declared type/count.
+// Invalid types, empty values, and truncated payloads are never treated as zero.
+func (r *tiffReader) valueBytes(e ifdEntry) ([]byte, bool) {
+	var size uint64
+	switch e.typ {
+	case 1, 2, 7:
+		size = 1
+	case 3:
+		size = 2
+	case 4, 9:
+		size = 4
+	case 5, 10:
+		size = 8
+	default:
+		return nil, false
 	}
-	num := r.u32(off)
-	den := r.u32(off + 4)
+	n := size * uint64(e.count)
+	if n == 0 {
+		return nil, false
+	}
+	if n <= 4 {
+		return e.rawVal[:int(n)], true
+	}
+	end := uint64(e.offset) + n
+	if end > uint64(len(r.data)) {
+		return nil, false
+	}
+	return r.data[int(e.offset):int(end)], true
+}
+
+func (r *tiffReader) unsigned(e ifdEntry) (uint32, bool) {
+	if e.count != 1 {
+		return 0, false
+	}
+	b, ok := r.valueBytes(e)
+	if !ok {
+		return 0, false
+	}
+	switch e.typ {
+	case 1:
+		return uint32(b[0]), true
+	case 3:
+		return uint32(r.order.Uint16(b)), true
+	case 4:
+		return r.order.Uint32(b), true
+	}
+	return 0, false
+}
+
+func (r *tiffReader) fraction(e ifdEntry, signed bool) (float64, bool) {
+	expected := uint16(5)
+	if signed {
+		expected = 10
+	}
+	if e.typ != expected || e.count != 1 {
+		return 0, false
+	}
+	b, ok := r.valueBytes(e)
+	if !ok {
+		return 0, false
+	}
+	num, den := float64(r.order.Uint32(b)), float64(r.order.Uint32(b[4:]))
+	if signed {
+		num, den = float64(int32(r.order.Uint32(b))), float64(int32(r.order.Uint32(b[4:])))
+	}
 	if den == 0 {
-		return 0
+		return 0, false
 	}
-	return float64(num) / float64(den)
+	return num / den, true
 }
 
-// rationals3 reads three consecutive RATIONALs (used for GPS DMS values).
-func (r *tiffReader) rationals3(off uint32) [3]float64 {
-	var v [3]float64
-	for i := 0; i < 3; i++ {
-		v[i] = r.rational(int(off) + i*8)
+func (r *tiffReader) coordinate(e ifdEntry) ([3]float64, bool) {
+	var dms [3]float64
+	if e.typ != 5 || e.count != 3 {
+		return dms, false
 	}
-	return v
-}
-
-// ascii reads a TIFF ASCII field.
-// rawVal is the raw 4-byte field from the IFD entry;
-// if count <= 4 the string is stored inline, otherwise offset points to it.
-func (r *tiffReader) ascii(count uint32, rawVal [4]byte, offset uint32) string {
-	var b []byte
-	if count <= 4 {
-		b = rawVal[:count]
-	} else {
-		end := int(offset) + int(count)
-		if end > len(r.data) {
-			return ""
+	b, ok := r.valueBytes(e)
+	if !ok {
+		return dms, false
+	}
+	for i := range dms {
+		den := r.order.Uint32(b[i*8+4:])
+		if den == 0 {
+			return dms, false
 		}
-		b = r.data[offset:end]
+		dms[i] = float64(r.order.Uint32(b[i*8:])) / float64(den)
 	}
-	return strings.TrimRight(strings.TrimSpace(string(b)), "\x00")
+	return dms, dms[1] < 60 && dms[2] < 60
 }
 
 // ifdEntry represents one 12-byte entry in a TIFF IFD.
@@ -158,7 +217,7 @@ type ifdEntry struct {
 
 // readIFD parses all entries of an IFD starting at the given byte offset.
 func (r *tiffReader) readIFD(off int) []ifdEntry {
-	if off+2 > len(r.data) {
+	if off < 0 || off > len(r.data)-2 {
 		return nil
 	}
 	n := int(r.u16(off))
@@ -191,35 +250,39 @@ func dmsToDecimal(dms [3]float64, ref string) float64 {
 
 // exifResult holds the EXIF values we care about.
 type exifResult struct {
-	DateTime          string
-	DateTimeDigitized string
-	Camera            string
-	Make              string
-	Software          string
-	LensModel         string
-	Artist            string
-	Copyright         string
-	ImageDescription  string
-	Orientation       int
-	ExposureTime      float64
-	FNumber           float64
-	ISO               int
-	ExposureBias      float64
-	Flash             string
-	FocalLength       float64
-	FocalLength35mm   float64
-	MeteringMode      int
-	WhiteBalance      int
-	ColorSpace        int
-	GPSDOP            float64
-	GPSSpeed          float64
-	GPSImgDirection   float64
-	GPSDestBearing    float64
-	Lat               *float64
-	Lon               *float64
-	Alt               *float64
-	Width             int
-	Height            int
+	Present            map[string]bool
+	GPSSpeedRef        string
+	GPSImgDirectionRef string
+	GPSDestBearingRef  string
+	DateTime           string
+	DateTimeDigitized  string
+	Camera             string
+	Make               string
+	Software           string
+	LensModel          string
+	Artist             string
+	Copyright          string
+	ImageDescription   string
+	Orientation        int
+	ExposureTime       float64
+	FNumber            float64
+	ISO                int
+	ExposureBias       float64
+	Flash              int
+	FocalLength        float64
+	FocalLength35mm    float64
+	MeteringMode       int
+	WhiteBalance       int
+	ColorSpace         int
+	GPSDOP             float64
+	GPSSpeed           float64
+	GPSImgDirection    float64
+	GPSDestBearing     float64
+	Lat                *float64
+	Lon                *float64
+	Alt                *float64
+	Width              int
+	Height             int
 }
 
 func computeMegapixels(width, height int) float64 {
@@ -242,10 +305,16 @@ func extractEXIF(data []byte) *exifResult {
 			break
 		}
 		marker := data[i+1]
+		if marker == 0xDA || marker == 0xD9 {
+			break
+		}
 		segLen := int(binary.BigEndian.Uint16(data[i+2 : i+4]))
 		end := i + 2 + segLen
+		if segLen < 2 || end > len(data) {
+			break
+		}
 
-		if marker == 0xE1 && end <= len(data) && i+10 <= len(data) {
+		if marker == 0xE1 && i+10 <= end {
 			// APP1: check for "Exif\x00\x00" header
 			if bytes.Equal(data[i+4:i+10], []byte("Exif\x00\x00")) {
 				return parseTIFFExif(data[i+10 : end])
@@ -276,162 +345,184 @@ func parseTIFFExif(data []byte) *exifResult {
 	}
 
 	ifd0Off := int(tr.u32(4))
-	result := &exifResult{}
+	result := &exifResult{Present: make(map[string]bool)}
 	var exifOff, gpsOff uint32
 	var hasExif, hasGPS bool
-
-	// ── IFD0: common image data + sub-IFD pointers ─────────────────────────
-	for _, e := range tr.readIFD(ifd0Off) {
-		switch e.tag {
-		case 0x0100: // ImageWidth
-			if e.count == 1 {
-				result.Width = int(e.offset)
-			}
-		case 0x0101: // ImageLength
-			if e.count == 1 {
-				result.Height = int(e.offset)
-			}
-		case 0x010E: // ImageDescription
-			result.ImageDescription = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x010F: // Make
-			result.Make = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x0110: // Model
-			result.Camera = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x0112: // Orientation
-			result.Orientation = int(e.offset)
-		case 0x0131: // Software
-			result.Software = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x0132: // DateTime
-			result.DateTime = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x013B: // Artist
-			result.Artist = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x8298: // Copyright
-			result.Copyright = tr.ascii(e.count, e.rawVal, e.offset)
-		case 0x8769: // ExifIFD pointer
-			exifOff, hasExif = e.offset, true
-		case 0x8825: // GPS IFD pointer
-			gpsOff, hasGPS = e.offset, true
+	textValue := func(e ifdEntry) string {
+		if e.typ != 2 {
+			return ""
+		}
+		b, ok := tr.valueBytes(e)
+		if !ok {
+			return ""
+		}
+		return strings.TrimSpace(strings.TrimRight(string(b), "\x00"))
+	}
+	setInt := func(e ifdEntry, dst *int, key string) {
+		if e.typ != 3 {
+			return
+		}
+		if v, ok := tr.unsigned(e); ok {
+			*dst = int(v)
+			result.Present[key] = true
 		}
 	}
-
-	// ── ExifIFD: standard camera/exposure tags plus pixel dimensions ──────
+	setFraction := func(e ifdEntry, dst *float64, key string, signed bool) {
+		if v, ok := tr.fraction(e, signed); ok {
+			*dst = v
+			result.Present[key] = true
+		}
+	}
+	setDimension := func(e ifdEntry, dst *int) {
+		if e.typ != 3 && e.typ != 4 {
+			return
+		}
+		if v, ok := tr.unsigned(e); ok {
+			*dst = int(v)
+		}
+	}
+	for _, e := range tr.readIFD(ifd0Off) {
+		switch e.tag {
+		case 0x0100:
+			setDimension(e, &result.Width)
+		case 0x0101:
+			setDimension(e, &result.Height)
+		case 0x010E:
+			result.ImageDescription = textValue(e)
+		case 0x010F:
+			result.Make = textValue(e)
+		case 0x0110:
+			result.Camera = textValue(e)
+		case 0x0112:
+			setInt(e, &result.Orientation, "orientation")
+		case 0x0131:
+			result.Software = textValue(e)
+		case 0x0132:
+			result.DateTime = textValue(e)
+		case 0x013B:
+			result.Artist = textValue(e)
+		case 0x8298:
+			result.Copyright = textValue(e)
+		case 0x8769:
+			if e.typ == 4 {
+				exifOff, hasExif = tr.unsigned(e)
+			}
+		case 0x8825:
+			if e.typ == 4 {
+				gpsOff, hasGPS = tr.unsigned(e)
+			}
+		}
+	}
+	var shutterSpeed float64
+	var hasShutterSpeed bool
 	if hasExif {
 		for _, e := range tr.readIFD(int(exifOff)) {
 			switch e.tag {
-			case 0x9003: // DateTimeOriginal
-				result.DateTime = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0x9004: // DateTimeDigitized
-				result.DateTimeDigitized = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0x9201: // Shutter speed (ExposureTime) — usually rational
-				if e.count == 1 {
-					result.ExposureTime = tr.rational(int(e.offset))
+			case 0x9003:
+				if v := textValue(e); v != "" {
+					result.DateTime = v
 				}
-			case 0x829A: // ExposureTime
-				if e.count == 1 {
-					result.ExposureTime = tr.rational(int(e.offset))
+			case 0x9004:
+				result.DateTimeDigitized = textValue(e)
+			case 0x829A:
+				setFraction(e, &result.ExposureTime, "exposure_time", false)
+			case 0x9201:
+				shutterSpeed, hasShutterSpeed = tr.fraction(e, true)
+			case 0x829D:
+				setFraction(e, &result.FNumber, "f_number", false)
+			case 0x8827:
+				setInt(e, &result.ISO, "iso")
+			case 0x9204:
+				setFraction(e, &result.ExposureBias, "exposure_bias", true)
+			case 0x9209:
+				setInt(e, &result.Flash, "flash")
+			case 0x920A:
+				setFraction(e, &result.FocalLength, "focal_length", false)
+			case 0xA434:
+				result.LensModel = textValue(e)
+			case 0xA001:
+				setInt(e, &result.ColorSpace, "color_space")
+			case 0xA002:
+				setDimension(e, &result.Width)
+			case 0xA003:
+				setDimension(e, &result.Height)
+			case 0x9207:
+				setInt(e, &result.MeteringMode, "metering_mode")
+			case 0xA405:
+				if e.typ == 3 {
+					if v, ok := tr.unsigned(e); ok {
+						result.FocalLength35mm = float64(v)
+						result.Present["focal_length_35mm"] = true
+					}
 				}
-			case 0x829D: // FNumber
-				if e.count == 1 {
-					result.FNumber = tr.rational(int(e.offset))
-				}
-			case 0x8822: // ExposureProgram
-			case 0x8827: // ISO speed
-				if e.count == 1 {
-					result.ISO = int(tr.u16(int(e.offset)))
-				}
-			case 0x9202: // ApertureValue
-			case 0x9204: // ExposureBiasValue
-				if e.count == 1 {
-					result.ExposureBias = tr.rational(int(e.offset))
-				}
-			case 0x9209: // Flash
-				result.Flash = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0x920A: // FocalLength
-				if e.count == 1 {
-					result.FocalLength = tr.rational(int(e.offset))
-				}
-			case 0xA432: // LensSpecification
-			case 0xA433: // LensModel
-				result.LensModel = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0xA435: // LensMake
-			case 0xA005: // InteroperabilityOffset
-			case 0xA001: // ColorSpace
-				if e.count == 1 {
-					result.ColorSpace = int(tr.u16(int(e.offset)))
-				}
-			case 0xA002: // PixelXDimension / ExifImageWidth
-				if e.count == 1 {
-					result.Width = int(e.offset)
-				}
-			case 0xA003: // PixelYDimension / ExifImageHeight
-				if e.count == 1 {
-					result.Height = int(e.offset)
-				}
-			case 0x9207: // MeteringMode
-				if e.count == 1 {
-					result.MeteringMode = int(tr.u16(int(e.offset)))
-				}
-			case 0x9208: // LightSource
-			case 0xA406: // LensInfo / 35mm focal length likely stored here in some cameras
-				if e.count == 1 {
-					result.FocalLength35mm = tr.rational(int(e.offset))
-				}
-			case 0xA407: // FlashEnergy
-			case 0xA401: // CustomRendered
-			case 0xA403: // WhiteBalance
-				if e.count == 1 {
-					result.WhiteBalance = int(tr.u16(int(e.offset)))
-				}
+			case 0xA403:
+				setInt(e, &result.WhiteBalance, "white_balance")
 			}
 		}
 	}
+	// ExposureTime is authoritative regardless of directory order.
+	if (!result.Present["exposure_time"] || result.ExposureTime <= 0) && hasShutterSpeed {
+		if seconds := math.Exp2(-shutterSpeed); seconds > 0 && !math.IsInf(seconds, 0) {
+			result.ExposureTime = seconds
+			result.Present["exposure_time"] = true
+		}
+	}
 
-	// ── GPS IFD: lat / lon / alt ────────────────────────────────────────────
 	if hasGPS {
 		var latRef, lonRef string
 		var latDMS, lonDMS [3]float64
 		var hasLat, hasLon bool
-
+		var altitude float64
+		var hasAltitude bool
+		var altitudeRef uint32
+		// EXIF defines zero (above sea level) as the default altitude reference.
+		altitudeRefOK := true
 		for _, e := range tr.readIFD(int(gpsOff)) {
 			switch e.tag {
-			case 0x0001: // GPSLatitudeRef  (e.g. "N")
-				latRef = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0x0002: // GPSLatitude – 3 RATIONALs
-				latDMS = tr.rationals3(e.offset)
-				hasLat = true
-			case 0x0003: // GPSLongitudeRef (e.g. "E")
-				lonRef = tr.ascii(e.count, e.rawVal, e.offset)
-			case 0x0004: // GPSLongitude – 3 RATIONALs
-				lonDMS = tr.rationals3(e.offset)
-				hasLon = true
-			case 0x0005: // GPSAltitudeRef
-			case 0x0006: // GPSAltitude – 1 RATIONAL
-				alt := tr.rational(int(e.offset))
-				result.Alt = &alt
-			case 0x000B: // GPSDOP
-				if e.count == 1 {
-					result.GPSDOP = tr.rational(int(e.offset))
+			case 0x0001:
+				latRef = textValue(e)
+			case 0x0002:
+				latDMS, hasLat = tr.coordinate(e)
+			case 0x0003:
+				lonRef = textValue(e)
+			case 0x0004:
+				lonDMS, hasLon = tr.coordinate(e)
+			case 0x0005:
+				altitudeRefOK = false
+				if e.typ == 1 {
+					altitudeRef, altitudeRefOK = tr.unsigned(e)
+					altitudeRefOK = altitudeRefOK && altitudeRef <= 1
 				}
-			case 0x000D: // GPSSpeed
-				if e.count == 1 {
-					result.GPSSpeed = tr.rational(int(e.offset))
-				}
-			case 0x0017: // GPSImgDirection
-				if e.count == 1 {
-					result.GPSImgDirection = tr.rational(int(e.offset))
-				}
-			case 0x0019: // GPSDestBearing
-				if e.count == 1 {
-					result.GPSDestBearing = tr.rational(int(e.offset))
-				}
+			case 0x0006:
+				altitude, hasAltitude = tr.fraction(e, false)
+			case 0x000B:
+				setFraction(e, &result.GPSDOP, "gps_dop", false)
+			case 0x000C:
+				result.GPSSpeedRef = textValue(e)
+			case 0x000D:
+				setFraction(e, &result.GPSSpeed, "gps_speed", false)
+			case 0x0010:
+				result.GPSImgDirectionRef = textValue(e)
+			case 0x0011:
+				setFraction(e, &result.GPSImgDirection, "gps_img_direction", false)
+			case 0x0017:
+				result.GPSDestBearingRef = textValue(e)
+			case 0x0018:
+				setFraction(e, &result.GPSDestBearing, "gps_dest_bearing", false)
 			}
 		}
-
-		if hasLat && hasLon {
+		if hasAltitude && altitudeRefOK {
+			if altitudeRef == 1 {
+				altitude = -altitude
+			}
+			result.Alt = &altitude
+		}
+		if hasLat && hasLon && (latRef == "N" || latRef == "S") && (lonRef == "E" || lonRef == "W") {
 			lat := dmsToDecimal(latDMS, latRef)
 			lon := dmsToDecimal(lonDMS, lonRef)
-			result.Lat = &lat
-			result.Lon = &lon
+			if math.Abs(lat) <= 90 && math.Abs(lon) <= 180 {
+				result.Lat, result.Lon = &lat, &lon
+			}
 		}
 	}
 
@@ -442,10 +533,120 @@ func parseTIFFExif(data []byte) *exifResult {
 // XMP parser
 // ════════════════════════════════════════════════════════════════════════════
 
-// parseXMP extracts all key/value attribute pairs from an XMP block string,
-// stripping namespace prefixes (e.g. "drone-dji:GimbalPitchDegree" → "GimbalPitchDegree").
-func parseXMP(xmpData string) map[string]string {
-	result := make(map[string]string)
+const (
+	xmpNSXMP      = "http://ns.adobe.com/xap/1.0/"
+	xmpNSTIFF     = "http://ns.adobe.com/tiff/1.0/"
+	xmpNSEXIF     = "http://ns.adobe.com/exif/1.0/"
+	xmpNSXMPMM    = "http://ns.adobe.com/xap/1.0/mm/"
+	xmpNSDC       = "http://purl.org/dc/elements/1.1/"
+	xmpNSCRS      = "http://ns.adobe.com/camera-raw-settings/1.0/"
+	xmpNSDJI      = "http://www.dji.com/drone-dji/1.0/"
+	xmpNSGPano    = "http://ns.google.com/photos/1.0/panorama/"
+	xmpNSCamera   = "http://pix4d.com/camera/1.0"
+	xmpNSCameraV1 = "http://pix4d.com/camera/1.0/"
+)
+
+var xmpNamespaceNames = map[string]string{
+	xmpNSXMP:      "xmp",
+	xmpNSTIFF:     "tiff",
+	xmpNSEXIF:     "exif",
+	xmpNSXMPMM:    "xmp_mm",
+	xmpNSDC:       "dc",
+	xmpNSCRS:      "crs",
+	xmpNSDJI:      "drone_dji",
+	xmpNSGPano:    "gpano",
+	xmpNSCamera:   "camera",
+	xmpNSCameraV1: "camera_v1",
+}
+
+type xmpAttribute struct {
+	namespace string
+	local     string
+	value     string
+	canonical string
+}
+
+type xmpParseResult struct {
+	Fields   map[string]string
+	Warnings []string
+}
+
+func sanitizeXMPKeyPart(s string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range s {
+		valid := r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		if valid {
+			b.WriteRune(r)
+			lastUnderscore = r == '_'
+		} else if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	part := strings.Trim(b.String(), "_")
+	if part == "" {
+		return "field"
+	}
+	return part
+}
+
+func xmpNamespaceName(uri string) string {
+	if uri == "" {
+		return "unqualified"
+	}
+	if name, ok := xmpNamespaceNames[uri]; ok {
+		return name
+	}
+	sum := sha256.Sum256([]byte(uri))
+	return fmt.Sprintf("ns_%x", sum[:4])
+}
+
+func xmpCanonicalKey(namespace, local string) string {
+	return "xmp_" + xmpNamespaceName(namespace) + "_" + sanitizeXMPKeyPart(local)
+}
+
+// legacyXMPAlias defines the temporary compatibility surface for schema 2.
+// Version is deliberately excluded because it is common to multiple namespaces.
+func legacyXMPAlias(namespace, local string) (string, bool) {
+	if strings.EqualFold(local, "Version") {
+		return "", false
+	}
+	switch namespace {
+	case xmpNSXMP:
+		switch strings.ToLower(local) {
+		case "createdate":
+			return "XMP_CreateDate", true
+		case "modifydate":
+			return "ModifyDate", true
+		}
+	case xmpNSTIFF:
+		if local == "Make" || local == "Model" {
+			return local, true
+		}
+	case xmpNSDC:
+		if strings.EqualFold(local, "format") {
+			return "format", true
+		}
+	case xmpNSDJI:
+		switch strings.ToLower(local) {
+		case "gpslatitude":
+			return "XMP_Gps_Lat", true
+		case "gpslongitude":
+			return "XMP_Gps_Lon", true
+		default:
+			return local, true
+		}
+	case xmpNSCRS, xmpNSCamera, xmpNSCameraV1, xmpNSGPano, xmpNSEXIF, xmpNSXMPMM:
+		return local, true
+	}
+	return "", false
+}
+
+// parseXMP emits a canonical key for every attribute using its namespace URI.
+// Selected unambiguous legacy aliases are retained for one transition schema.
+func parseXMP(xmpData string) xmpParseResult {
+	attributes := []xmpAttribute{}
 	decoder := xml.NewDecoder(strings.NewReader(xmpData))
 	for {
 		token, err := decoder.Token()
@@ -460,21 +661,95 @@ func parseXMP(xmpData string) map[string]string {
 			if attr.Name.Space == "xmlns" || attr.Name.Local == "xmlns" {
 				continue
 			}
-			key := attr.Name.Local
-			if key == "about" || key == "xmptk" {
+			if attr.Name.Local == "about" || attr.Name.Local == "xmptk" {
 				continue
 			}
-			switch strings.ToLower(key) {
-			case "gpslatitude":
-				key = "XMP_Gps_Lat"
-			case "gpslongitude":
-				key = "XMP_Gps_Lon"
-			case "createdate":
-				key = "XMP_CreateDate"
-			}
-			result[key] = attr.Value
+			attributes = append(attributes, xmpAttribute{
+				namespace: attr.Name.Space,
+				local:     attr.Name.Local,
+				value:     attr.Value,
+				canonical: xmpCanonicalKey(attr.Name.Space, attr.Name.Local),
+			})
 		}
 	}
+
+	result := xmpParseResult{Fields: make(map[string]string)}
+	warnings := map[string]bool{}
+	localNamespaces := map[string]map[string]bool{}
+	aliasSources := map[string]map[string]bool{}
+	canonicalSources := map[string]map[string]bool{}
+
+	for _, attr := range attributes {
+		if canonicalSources[attr.canonical] == nil {
+			canonicalSources[attr.canonical] = map[string]bool{}
+		}
+		canonicalSources[attr.canonical][attr.namespace+"\x00"+attr.local] = true
+
+		if previous, exists := result.Fields[attr.canonical]; exists && previous != attr.value {
+			values := []string{previous, attr.value}
+			sort.Strings(values)
+			result.Fields[attr.canonical] = values[0]
+			warnings[fmt.Sprintf("canonical XMP key %q occurs with different values; keeping the lexicographically first value", attr.canonical)] = true
+		} else if !exists {
+			result.Fields[attr.canonical] = attr.value
+		}
+
+		localKey := strings.ToLower(attr.local)
+		if localNamespaces[localKey] == nil {
+			localNamespaces[localKey] = map[string]bool{}
+		}
+		localNamespaces[localKey][xmpNamespaceName(attr.namespace)] = true
+
+		if alias, ok := legacyXMPAlias(attr.namespace, attr.local); ok {
+			if aliasSources[alias] == nil {
+				aliasSources[alias] = map[string]bool{}
+			}
+			aliasSources[alias][attr.canonical] = true
+		}
+	}
+
+	for canonical, sources := range canonicalSources {
+		if len(sources) > 1 {
+			warnings[fmt.Sprintf("canonical XMP key %q would merge %d distinct expanded attribute names after key sanitization", canonical, len(sources))] = true
+		}
+	}
+
+	for local, namespaces := range localNamespaces {
+		if len(namespaces) < 2 {
+			continue
+		}
+		names := make([]string, 0, len(namespaces))
+		for name := range namespaces {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		warnings[fmt.Sprintf("XMP local-name collision %q across namespaces %s; canonical fields were preserved and an ambiguous legacy alias was omitted", local, strings.Join(names, ", "))] = true
+	}
+
+	aliases := make([]string, 0, len(aliasSources))
+	for alias := range aliasSources {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		sources := aliasSources[alias]
+		if len(sources) != 1 {
+			warnings[fmt.Sprintf("legacy XMP alias %q is ambiguous and was omitted", alias)] = true
+			continue
+		}
+		if _, collides := result.Fields[alias]; collides {
+			warnings[fmt.Sprintf("legacy XMP alias %q collides with a canonical field and was omitted", alias)] = true
+			continue
+		}
+		for canonical := range sources {
+			result.Fields[alias] = result.Fields[canonical]
+		}
+	}
+
+	for warning := range warnings {
+		result.Warnings = append(result.Warnings, warning)
+	}
+	sort.Strings(result.Warnings)
 	return result
 }
 
@@ -497,7 +772,20 @@ var excludedOutputFields = map[string]bool{
 }
 
 func newMetadata() Metadata {
-	return Metadata{Fields: make(map[string]interface{})}
+	return Metadata{Fields: map[string]interface{}{
+		"dapm_version":        dapmVersion,
+		"dapm_schema_version": dapmSchemaVersion,
+	}}
+}
+
+var reportedXMPWarnings = map[string]bool{}
+
+func reportXMPWarning(filePath, warning string) {
+	if reportedXMPWarnings[warning] {
+		return
+	}
+	reportedXMPWarnings[warning] = true
+	fmt.Printf("  ⚠ XMP warning in %s: %s (further identical warnings suppressed)\n", filepath.Base(filePath), warning)
 }
 
 // extractMetadata reads EXIF + XMP from a JPEG file.
@@ -551,38 +839,47 @@ func extractMetadata(filePath string) Metadata {
 		if exif.ISO > 0 {
 			meta.Fields["iso"] = exif.ISO
 		}
-		if exif.ExposureBias != 0 {
+		if exif.Present["exposure_bias"] {
 			meta.Fields["exposure_bias"] = exif.ExposureBias
 		}
-		if exif.Flash != "" {
+		if exif.Present["flash"] {
 			meta.Fields["flash"] = exif.Flash
 		}
 		if exif.FocalLength > 0 {
 			meta.Fields["focal_length"] = exif.FocalLength
 		}
-		if exif.FocalLength35mm > 0 {
+		if exif.Present["focal_length_35mm"] {
 			meta.Fields["focal_length_35mm"] = exif.FocalLength35mm
 		}
-		if exif.MeteringMode > 0 {
+		if exif.Present["metering_mode"] {
 			meta.Fields["metering_mode"] = exif.MeteringMode
 		}
-		if exif.WhiteBalance > 0 {
+		if exif.Present["white_balance"] {
 			meta.Fields["white_balance"] = exif.WhiteBalance
 		}
-		if exif.ColorSpace > 0 {
+		if exif.Present["color_space"] {
 			meta.Fields["color_space"] = exif.ColorSpace
 		}
-		if exif.GPSDOP > 0 {
+		if exif.Present["gps_dop"] {
 			meta.Fields["gps_dop"] = exif.GPSDOP
 		}
-		if exif.GPSSpeed > 0 {
+		if exif.Present["gps_speed"] {
 			meta.Fields["gps_speed"] = exif.GPSSpeed
 		}
-		if exif.GPSImgDirection > 0 {
+		if exif.Present["gps_img_direction"] {
 			meta.Fields["gps_img_direction"] = exif.GPSImgDirection
 		}
-		if exif.GPSDestBearing > 0 {
+		if exif.Present["gps_dest_bearing"] {
 			meta.Fields["gps_dest_bearing"] = exif.GPSDestBearing
+		}
+		for key, value := range map[string]string{
+			"gps_speed_ref":         exif.GPSSpeedRef,
+			"gps_img_direction_ref": exif.GPSImgDirectionRef,
+			"gps_dest_bearing_ref":  exif.GPSDestBearingRef,
+		} {
+			if value != "" {
+				meta.Fields[key] = value
+			}
 		}
 		if exif.Width > 0 && exif.Height > 0 {
 			meta.Fields["width"] = exif.Width
@@ -609,25 +906,24 @@ func extractMetadata(filePath string) Metadata {
 		remaining := raw[xmpStart:]
 		xmpEnd := bytes.Index(remaining, []byte("</x:xmpmeta>"))
 		if xmpEnd != -1 {
-			xmpBlock := string(remaining[:xmpEnd+12])
-			for k, v := range parseXMP(xmpBlock) {
-				if _, exists := meta.Fields[k]; exists {
-					continue // never override EXIF values
+			xmpBlock := string(remaining[:xmpEnd+len("</x:xmpmeta>")])
+			parsed := parseXMP(xmpBlock)
+			for _, warning := range parsed.Warnings {
+				reportXMPWarning(filePath, warning)
+			}
+			for k, v := range parsed.Fields {
+				if existing, exists := meta.Fields[k]; exists {
+					if fmt.Sprint(existing) != v {
+						reportXMPWarning(filePath, fmt.Sprintf("XMP field %q conflicts with an existing output field and was omitted", k))
+					}
+					continue
 				}
-				if fv, err := strconv.ParseFloat(v, 64); err == nil {
+				if fv, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(fv) && !math.IsInf(fv, 0) {
 					meta.Fields[k] = fv
 				} else {
 					meta.Fields[k] = v
 				}
 			}
-		}
-	}
-
-	if exif := extractEXIF(raw); exif != nil {
-		if exif.Width > 0 && exif.Height > 0 {
-			meta.Fields["width"] = exif.Width
-			meta.Fields["height"] = exif.Height
-			meta.Fields["megapixels"] = computeMegapixels(exif.Width, exif.Height)
 		}
 	}
 
@@ -650,8 +946,10 @@ type geoFeature struct {
 }
 
 type geoCollection struct {
-	Type     string       `json:"type"`
-	Features []geoFeature `json:"features"`
+	Type              string       `json:"type"`
+	DAPMVersion       string       `json:"dapm_version"`
+	DAPMSchemaVersion string       `json:"dapm_schema_version"`
+	Features          []geoFeature `json:"features"`
 }
 
 func buildGeoJSON(cfg Config) {
@@ -732,7 +1030,12 @@ func buildGeoJSON(cfg Config) {
 		features = []geoFeature{}
 	}
 
-	out, err := json.MarshalIndent(geoCollection{Type: "FeatureCollection", Features: features}, "", "    ")
+	out, err := json.MarshalIndent(geoCollection{
+		Type:              "FeatureCollection",
+		DAPMVersion:       dapmVersion,
+		DAPMSchemaVersion: dapmSchemaVersion,
+		Features:          features,
+	}, "", "    ")
 	if err != nil {
 		fmt.Printf("JSON error: %v\n", err)
 		return
@@ -828,7 +1131,7 @@ func sortStrings(s []string) {
 // Webmap generator
 // ════════════════════════════════════════════════════════════════════════════
 
-// createWebmap reads template.html (from the same directory as the binary),
+// createWebmap reads template.html from the build directory,
 // fills in the placeholders, and writes index.html next to the GeoJSON file.
 // The placeholders used in template.html are Python str.format() style, i.e.
 // {title}, {center_lat}, {center_lon}, {geojsonFile}, {geojsonData}, {author}.
@@ -863,15 +1166,26 @@ func createWebmap(cfg Config) {
 	centerLat := latSum / float64(count)
 	centerLon := lonSum / float64(count)
 
-	// ── 3. Load template.html from the binary's directory ────────────────────
+	// ── 3. Locate template.html ───────────────────────────────────────────────
 	exe, err := os.Executable()
 	if err != nil {
 		exe = "."
 	}
-	templatePath := filepath.Join(filepath.Dir(exe), "template.html")
-	tmplBytes, err := os.ReadFile(templatePath)
-	if err != nil {
-		fmt.Printf("createWebmap: cannot read template.html at %s: %v\n", templatePath, err)
+	templateCandidates := []string{
+		filepath.Join(filepath.Dir(exe), "template.html"),
+		"template.html",
+		filepath.Join("build", "template.html"),
+		filepath.Join("..", "..", "build", "template.html"),
+	}
+	var tmplBytes []byte
+	for _, candidate := range templateCandidates {
+		if data, readErr := os.ReadFile(candidate); readErr == nil {
+			tmplBytes = data
+			break
+		}
+	}
+	if tmplBytes == nil {
+		fmt.Printf("createWebmap: cannot find template.html; checked %s\n", strings.Join(templateCandidates, ", "))
 		return
 	}
 

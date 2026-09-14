@@ -1,0 +1,434 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gianfrancodp/DAPM/blob/main/OUTPUT_SCHEMA.json",
+  "title": "DAPM output schema 2",
+  "description": "Machine contract for GeoJSON FeatureCollections and shapefile DBF field-mapping sidecars written by the Go and Python implementations of DAPM 1.1.2.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/featureCollection"
+    },
+    {
+      "$ref": "#/$defs/dbfFieldMapping"
+    }
+  ],
+  "$defs": {
+    "dapmVersion": {
+      "type": "string",
+      "const": "1.1.2",
+      "description": "Producing executable version."
+    },
+    "dapmSchemaVersion": {
+      "type": "string",
+      "const": "2",
+      "description": "Output contract version."
+    },
+    "xmpValue": {
+      "type": [
+        "number",
+        "string"
+      ],
+      "description": "A finite numeric XMP lexical value is emitted as a number; all other XMP attribute values are strings."
+    },
+    "featureCollection": {
+      "type": "object",
+      "required": [
+        "type",
+        "dapm_version",
+        "dapm_schema_version",
+        "features"
+      ],
+      "properties": {
+        "type": {
+          "const": "FeatureCollection"
+        },
+        "dapm_version": {
+          "$ref": "#/$defs/dapmVersion"
+        },
+        "dapm_schema_version": {
+          "$ref": "#/$defs/dapmSchemaVersion"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feature"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "feature": {
+      "type": "object",
+      "required": [
+        "type",
+        "geometry",
+        "properties"
+      ],
+      "properties": {
+        "type": {
+          "const": "Feature"
+        },
+        "geometry": {
+          "$ref": "#/$defs/pointZ"
+        },
+        "properties": {
+          "$ref": "#/$defs/metadataProperties"
+        }
+      },
+      "additionalProperties": false
+    },
+    "pointZ": {
+      "type": "object",
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "properties": {
+        "type": {
+          "const": "Point"
+        },
+        "coordinates": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "description": "Longitude in decimal degrees."
+            },
+            {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90,
+              "description": "Latitude in decimal degrees."
+            },
+            {
+              "type": "number",
+              "description": "EXIF GPS altitude in metres; zero is also the compatibility value for missing altitude."
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadataProperties": {
+      "type": "object",
+      "required": [
+        "filename",
+        "filepath",
+        "relative_filepath",
+        "dapm_version",
+        "dapm_schema_version"
+      ],
+      "propertyNames": {
+        "not": {
+          "const": "Version"
+        }
+      },
+      "properties": {
+        "dapm_version": {
+          "$ref": "#/$defs/dapmVersion"
+        },
+        "dapm_schema_version": {
+          "$ref": "#/$defs/dapmSchemaVersion"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "filepath": {
+          "type": "string"
+        },
+        "relative_filepath": {
+          "type": "string"
+        },
+        "megapixels": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "datetime": {
+          "type": "string"
+        },
+        "date_time_digitized": {
+          "type": "string"
+        },
+        "software": {
+          "type": "string"
+        },
+        "lens_model": {
+          "type": "string"
+        },
+        "artist": {
+          "type": "string"
+        },
+        "copyright": {
+          "type": "string"
+        },
+        "image_description": {
+          "type": "string"
+        },
+        "orientation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exposure_time": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "f_number": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "iso": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "exposure_bias": {
+          "type": "number"
+        },
+        "flash": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "focal_length": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "focal_length_35mm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metering_mode": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "white_balance": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "color_space": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "EXIF_Lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "EXIF_Lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "gps_dop": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gps_speed": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gps_speed_ref": {
+          "type": "string"
+        },
+        "gps_img_direction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gps_img_direction_ref": {
+          "type": "string"
+        },
+        "gps_dest_bearing": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gps_dest_bearing_ref": {
+          "type": "string"
+        },
+        "Make": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "Model": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "format": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "ModifyDate": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "XMP_CreateDate": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "AlreadyApplied": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "HasCrop": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "HasSettings": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "XMP_Gps_Lat": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "XMP_Gps_Lon": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "AbsoluteAltitude": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "RelativeAltitude": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "AltitudeType": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "GpsStatus": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightPitchDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightRollDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightYawDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "GimbalPitchDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "GimbalRollDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "GimbalYawDegree": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightXSpeed": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightYSpeed": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FlightZSpeed": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "CamReverse": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "GimbalReverse": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "CameraSerialNumber": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "ProductName": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "ShutterType": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "SurveyingMode": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "WhiteBalanceCCT": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "SensorFPS": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "SensorTemperature": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "LensTemperature": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "LensPosition": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "LensInfinitePosition": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "FileType": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "SelectAngle": {
+          "$ref": "#/$defs/xmpValue"
+        },
+        "SelfData": {
+          "$ref": "#/$defs/xmpValue"
+        }
+      },
+      "patternProperties": {
+        "^xmp_(?:xmp|tiff|exif|xmp_mm|dc|crs|drone_dji|gpano|camera|camera_v1|unqualified|ns_[0-9a-f]{8})_[A-Za-z0-9_]+$": {
+          "$ref": "#/$defs/xmpValue"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/xmpValue",
+        "description": "Selected transition aliases from known namespaces may have additional local names."
+      }
+    },
+    "dbfFieldMapping": {
+      "type": "object",
+      "required": [
+        "dapm_version",
+        "dapm_schema_version",
+        "fields"
+      ],
+      "properties": {
+        "dapm_version": {
+          "$ref": "#/$defs/dapmVersion"
+        },
+        "dapm_schema_version": {
+          "$ref": "#/$defs/dapmSchemaVersion"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dbfField"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dbfField": {
+      "type": "object",
+      "required": [
+        "dbf_name",
+        "source_name",
+        "dbf_type",
+        "width"
+      ],
+      "properties": {
+        "dbf_name": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,10}$"
+        },
+        "source_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dbf_type": {
+          "const": "C"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 254
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
