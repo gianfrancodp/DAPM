@@ -16,10 +16,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -442,32 +442,38 @@ func parseTIFFExif(data []byte) *exifResult {
 // XMP parser
 // ════════════════════════════════════════════════════════════════════════════
 
-// xmpAttrRe matches [namespace:]Key="value" attributes in XMP XML.
-var xmpAttrRe = regexp.MustCompile(`(?:[\w-]+:)?([\w]+)="([^"]*)"`)
-
-// skipXMPKeys contains XML boilerplate keys to ignore.
-var skipXMPKeys = map[string]bool{
-	"xmlns": true, "about": true, "xmptk": true,
-}
-
 // parseXMP extracts all key/value attribute pairs from an XMP block string,
 // stripping namespace prefixes (e.g. "drone-dji:GimbalPitchDegree" → "GimbalPitchDegree").
 func parseXMP(xmpData string) map[string]string {
 	result := make(map[string]string)
-	for _, m := range xmpAttrRe.FindAllStringSubmatch(xmpData, -1) {
-		key := m[1]
-		if skipXMPKeys[key] || strings.HasPrefix(strings.ToLower(key), "xmlns") {
+	decoder := xml.NewDecoder(strings.NewReader(xmpData))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok {
 			continue
 		}
-		switch strings.ToLower(key) {
-		case "gpslatitude":
-			key = "XMP_Gps_Lat"
-		case "gpslongitude":
-			key = "XMP_Gps_Lon"
-		case "createdate":
-			key = "XMP_CreateDate"
+		for _, attr := range start.Attr {
+			if attr.Name.Space == "xmlns" || attr.Name.Local == "xmlns" {
+				continue
+			}
+			key := attr.Name.Local
+			if key == "about" || key == "xmptk" {
+				continue
+			}
+			switch strings.ToLower(key) {
+			case "gpslatitude":
+				key = "XMP_Gps_Lat"
+			case "gpslongitude":
+				key = "XMP_Gps_Lon"
+			case "createdate":
+				key = "XMP_CreateDate"
+			}
+			result[key] = attr.Value
 		}
-		result[key] = m[2]
 	}
 	return result
 }
@@ -735,6 +741,7 @@ func buildGeoJSON(cfg Config) {
 		fmt.Printf("Error writing output: %v\n", err)
 		return
 	}
+	exportValidData(features, cfg.OutputFile)
 	fmt.Printf("\n✅ GeoJSON created! Found %d valid photos. Saved to %s\n",
 		len(features), cfg.OutputFile)
 
