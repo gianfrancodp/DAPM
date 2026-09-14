@@ -1,11 +1,12 @@
 
 
 '''
-Drone Aerial Photo Mapper (DAPM) - Version 1.0
+Drone Aerial Photo Mapper (DAPM) - Version 1.1.2
 Author: Gianfranco Di Pietro (@gianfrancodp)
 Description:
-A Python tool to extract GPS and metadata from drone aerial photos (JPG/JPEG), build
-a GeoJSON database, and create an interactive Leaflet.js webmap for visualization and exploration.
+Recursively scans JPG/JPEG drone photos, extracts standard EXIF and available
+XMP metadata, builds a WGS 84 GeoJSON photo database, and creates an
+interactive Leaflet.js web map.
 Features:
 - Recursive directory scanning for drone photos
 - EXIF metadata extraction (GPS, datetime, camera model)
@@ -17,6 +18,13 @@ Features:
     - Time slice filtering with noUiSlider
     - Rectangle selection tool with CSV export of selected points
     - Dynamic statistics panel and horizontal legend
+Current metadata and output conventions:
+- Geometry uses [longitude, latitude, altitude].
+- EXIF coordinates are EXIF_Lat and EXIF_Lon.
+- XMP coordinates are XMP_Gps_Lat and XMP_Gps_Lon; XMP_CreateDate is retained.
+- Legacy duplicate fields mp, make, and camera are omitted from attributes.
+- megapixels, Make, and Model are retained.
+- no_gps_photos.csv is created for photos without valid EXIF coordinates.
 Usage:
 1. Set the TARGET_DIR variable to the directory containing your drone photos.
 2. Set the OUTPUT_FILE variable to the desired output GeoJSON file path.
@@ -98,6 +106,12 @@ def parse_xmp_data(xmp_string):
                     else:
                         # key = f"{tag}_{attr_name}"
                         key = attr_name
+                if key.lower() == "gpslatitude":
+                    key = "XMP_Gps_Lat"
+                elif key.lower() == "gpslongitude":
+                    key = "XMP_Gps_Lon"
+                elif key.lower() == "createdate":
+                    key = "XMP_CreateDate"
                 xmp_dict[key] = attr_value
     
     except Exception as e:
@@ -139,6 +153,7 @@ def extract_drone_metadata(filepath):
     """Extract EXIF metadata and parse XMP data for drone photos."""
     metadata = {
         "lat": None, "lon": None, "alt": None,
+        "EXIF_Lat": None, "EXIF_Lon": None,
         "datetime": "unknown",
         "camera": "unknown",
         "make": None,
@@ -251,6 +266,8 @@ def extract_drone_metadata(filepath):
                 if 'GPSLatitude' in gps_data and 'GPSLongitude' in gps_data:
                     metadata["lat"] = get_decimal_from_dms(gps_data['GPSLatitude'], gps_data.get('GPSLatitudeRef', 'N'))
                     metadata["lon"] = get_decimal_from_dms(gps_data['GPSLongitude'], gps_data.get('GPSLongitudeRef', 'E'))
+                    metadata["EXIF_Lat"] = metadata["lat"]
+                    metadata["EXIF_Lon"] = metadata["lon"]
                 if 'GPSAltitude' in gps_data:
                     metadata["alt"] = float(gps_data['GPSAltitude'])
                 if 'GPSDOP' in gps_data:
@@ -293,8 +310,8 @@ def extract_drone_metadata(filepath):
                             metadata['camera_yaw'] = float(value)
                         elif key in ('CameraRollDegree', 'CameraRoll'):
                             metadata['camera_roll'] = float(value)
-                        elif key == 'Model' and metadata.get('camera') == 'unknown':
-                            metadata['camera'] = str(value)
+                        elif key == 'Model':
+                            metadata['Model'] = str(value)
                         elif key == 'LensModel' and metadata.get('lens_model') is None:
                             metadata['lens_model'] = str(value)
                         elif key not in metadata:
@@ -406,7 +423,7 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
                     
                     # Add all metadata fields, handling None and special values
                     for key, value in meta.items():
-                        if key not in ["lat", "lon", "alt"]:  # Skip coordinate fields
+                        if key not in ["lat", "lon", "alt", "mp", "make", "camera"]:
                             if value is None:
                                 properties[key] = None
                             elif isinstance(value, (int, float, str, bool)):
@@ -432,6 +449,8 @@ def build_geojson(OUTPUT_FILE=OUTPUT_FILE):
                         "relative_filepath": relative_filepath
                     }
                     for key, value in meta.items():
+                        if key in ["mp", "make", "camera"]:
+                            continue
                         if value is None:
                             row[key] = ""
                         elif isinstance(value, (int, float, str, bool)):

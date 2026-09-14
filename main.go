@@ -1,8 +1,12 @@
 package main
 
 // dapm – stdlib only, zero external dependencies.
-// Reads EXIF (GPS, camera model, datetime) and XMP (DJI gimbal / drone data)
-// from JPEG drone photos and writes a GeoJSON FeatureCollection.
+// Recursively scans JPEG/JPEG drone photos, extracting standard EXIF and
+// available XMP metadata, including DJI flight and gimbal attributes.
+// It writes GeoJSON Point features and an interactive Leaflet web map.
+// Geometry uses WGS 84 [longitude, latitude, altitude]; EXIF and XMP coordinate
+// properties use EXIF_ and XMP_ prefixes. Legacy mp, make, and camera fields
+// are omitted from output; photos without valid EXIF coordinates go to no_gps_photos.csv.
 //
 // Usage:  dapm input.yaml
 // Build:  go build -o dapm.exe .
@@ -455,6 +459,14 @@ func parseXMP(xmpData string) map[string]string {
 		if skipXMPKeys[key] || strings.HasPrefix(strings.ToLower(key), "xmlns") {
 			continue
 		}
+		switch strings.ToLower(key) {
+		case "gpslatitude":
+			key = "XMP_Gps_Lat"
+		case "gpslongitude":
+			key = "XMP_Gps_Lon"
+		case "createdate":
+			key = "XMP_CreateDate"
+		}
 		result[key] = m[2]
 	}
 	return result
@@ -470,6 +482,12 @@ type Metadata struct {
 	Lon    *float64
 	Alt    *float64
 	Fields map[string]interface{}
+}
+
+var excludedOutputFields = map[string]bool{
+	"mp":     true,
+	"make":   true,
+	"camera": true,
 }
 
 func newMetadata() Metadata {
@@ -569,6 +587,12 @@ func extractMetadata(filePath string) Metadata {
 		meta.Lat = exif.Lat
 		meta.Lon = exif.Lon
 		meta.Alt = exif.Alt
+		if exif.Lat != nil {
+			meta.Fields["EXIF_Lat"] = *exif.Lat
+		}
+		if exif.Lon != nil {
+			meta.Fields["EXIF_Lon"] = *exif.Lon
+		}
 	} else {
 		fmt.Printf("  ⚠ No EXIF data found in %s\n", filepath.Base(filePath))
 	}
@@ -658,7 +682,9 @@ func buildGeoJSON(cfg Config) {
 				"relative_filepath": relPathSlash,
 			}
 			for k, v := range meta.Fields {
-				row[k] = v
+				if !excludedOutputFields[k] {
+					row[k] = v
+				}
 			}
 			noGPSRows = append(noGPSRows, row)
 			return nil
@@ -675,7 +701,9 @@ func buildGeoJSON(cfg Config) {
 			"relative_filepath": relPathSlash,
 		}
 		for k, v := range meta.Fields {
-			props[k] = v
+			if !excludedOutputFields[k] {
+				props[k] = v
+			}
 		}
 
 		features = append(features, geoFeature{
