@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/gianfrancodp/DAPM/blob/main/OUTPUT_SCHEMA.json",
-  "title": "DAPM output schema 2",
+  "title": "DAPM output schema",
   "description": "Machine contract for GeoJSON FeatureCollections and shapefile DBF field-mapping sidecars written by the Go and Python implementations of DAPM 1.1.2.",
   "oneOf": [
     {
