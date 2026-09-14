@@ -8,11 +8,11 @@ See [OUTPUT_FIELDS.md](OUTPUT_FIELDS.md) for the schema-2 field definitions shar
 
 ## Quick Start
 
-1. Edit <code>src/golang/input.yaml</code>.
-2. Run the Windows executable:
-
+1. Download [<code>/build/dapm.exe</code>](build/dapm.exe), [<code>/build/template.html</code>](build/template.html) and [<code>/build/input.yaml</code>](build/input.yaml);
+2. Open <code>input.yaml</code> with a text editor and change the values;
+3. Run the Windows executable:
 ~~~powershell
-.\build\dapm.exe .\src\golang\input.yaml
+dapm.exe input.yaml
 ~~~
 
 This loads the YAML settings, scans JPG/JPEG files, extracts GPS and EXIF/XMP metadata, and generates all schema-2 outputs.
